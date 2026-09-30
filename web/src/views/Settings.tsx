@@ -8,6 +8,7 @@ import { useHarvestProjects } from '../components/HarvestPanel';
 import { useHarvest } from '../harvest';
 import { useUI } from '../ui';
 import type { Settings as S, TicketSource } from '../types';
+import { NotificationSettingsCard, ProjectsSettings } from './SettingsExtra';
 
 const ACCENTS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
 
@@ -62,7 +63,7 @@ export function Settings() {
 
       <section className="card">
         <h2>🏭 Factory</h2>
-        <div className="desc">How agents run and where their work lands.</div>
+        <div className="desc">How agents run. Repos, branches and shipping are set per project below.</div>
         <div className="row">
           <div className="seg">
             <button className={s.mode === 'mock' ? 'on' : ''} onClick={() => setS({ ...s, mode: 'mock' })}>Simulated agents</button>
@@ -71,22 +72,6 @@ export function Settings() {
           {s.mode === 'live' && !hasApiKey && <span className="small" style={{ color: 'var(--warn)' }}>No ANTHROPIC_API_KEY on the server — live mode will use your Claude Code login if present.</span>}
         </div>
         <div className="grid2">
-          <label className="field">Repository path (git)
-            <input className="input mono" placeholder="/Users/you/code/my-app" value={s.repoPath} onChange={(e) => setS({ ...s, repoPath: e.target.value })} />
-          </label>
-          <label className="field">Base branch
-            <input className="input mono" value={s.baseBranch} onChange={(e) => setS({ ...s, baseBranch: e.target.value })} />
-          </label>
-          <label className="field">Worktrees folder (optional)
-            <input className="input mono" placeholder="defaults to <repo>-factory-worktrees" value={s.worktreesDir} onChange={(e) => setS({ ...s, worktreesDir: e.target.value })} />
-          </label>
-          <label className="field">When you approve
-            <select className="select" value={s.mergeStrategy} onChange={(e) => setS({ ...s, mergeStrategy: e.target.value as S['mergeStrategy'] })}>
-              <option value="local-merge">Merge into base branch locally</option>
-              <option value="pull-request">Push branch & open a GitHub PR</option>
-              <option value="none">Leave the branch for me</option>
-            </select>
-          </label>
           <label className="field">Tickets worked in parallel
             <input className="input" type="number" min={1} max={8} value={s.concurrency} onChange={(e) => setS({ ...s, concurrency: Number(e.target.value) })} />
           </label>
@@ -100,6 +85,8 @@ export function Settings() {
         <div className="row"><Toggle on={s.gates.plan} onChange={(v) => setS({ ...s, gates: { ...s.gates, plan: v } })} /> <span>Approve every plan before coding starts</span></div>
         <div className="row"><Toggle on={s.gates.merge} onChange={(v) => setS({ ...s, gates: { ...s.gates, merge: v } })} /> <span>Sign off before anything merges or opens a PR</span></div>
       </section>
+
+      <ProjectsSettings s={s} setS={setS} />
 
       <section className="card">
         <h2>🛡 Quality gates</h2>
@@ -118,7 +105,7 @@ export function Settings() {
                 <option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option>
               </select>
             </label>
-            <div className="small muted" style={{ alignSelf: 'end' }}>Live mode uses it when “When you approve” is <em>open a GitHub PR</em> and GitHub is connected. Simulated mode fakes CI so you can try it.</div>
+            <div className="small muted" style={{ alignSelf: 'end' }}>Live mode uses it for projects whose “When you approve” is <em>open a GitHub PR</em>, with GitHub connected. Simulated mode fakes CI so you can try it.</div>
           </div>
         )}
         <div className="row"><Toggle on={s.watchdog.enabled} onChange={(v) => setS({ ...s, watchdog: { ...s.watchdog, enabled: v } })} /> <span><strong>Watchdog</strong> — restart an agent that goes quiet with a nudge, and only bring it to you if that doesn't work</span></div>
@@ -133,6 +120,8 @@ export function Settings() {
           </div>
         )}
       </section>
+
+      <NotificationSettingsCard s={s} setS={setS} dirty={dirty} />
 
       <HarvestSettings s={s} setS={setS} dirty={dirty} />
 
@@ -178,7 +167,7 @@ export function Settings() {
           </div>
           <label className="field">Open on
             <select className="select" value={prefs.defaultView} onChange={(e) => setPref('defaultView', e.target.value as View)}>
-              {(['office', 'board', 'agents', 'activity'] as View[]).map((v) => <option key={v} value={v}>{v}</option>)}
+              {(['inbox', 'office', 'board', 'reports', 'agents', 'activity'] as View[]).map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </label>
           <label className="field">Group board by

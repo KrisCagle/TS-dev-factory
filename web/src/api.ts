@@ -46,6 +46,20 @@ export interface HarvestProject {
   tasks: Array<{ id: number; name: string }>;
 }
 
+export interface Report {
+  range: 'day' | 'week';
+  from: string;
+  to: string;
+  project: string;
+  shipped: Array<{ key: string; title: string; prUrl?: string }>;
+  needsYou: Array<{ key: string; title: string }>;
+  inProgress: Array<{ key: string; title: string; stage: string }>;
+  blocked: Array<{ key: string; title: string; why: string }>;
+  spendUsd: number;
+  harvestHours?: number;
+  markdown: string;
+}
+
 export interface ServerState {
   tickets: Ticket[];
   attention: AttentionItem[];
@@ -73,9 +87,23 @@ export const api = {
   resetAgent: (role: AgentRole) => req<AgentConfig>('POST', `/api/agents/${role}/reset`),
   updateSettings: (s: Partial<Settings>) => req<Settings>('PATCH', '/api/settings', s),
   pause: (paused: boolean) => req('POST', '/api/factory/pause', { paused }),
-  sync: (source: TicketSource) => req<{ fetched: number; created: number }>('POST', `/api/connectors/${source}/sync`),
+  sync: (source: TicketSource, projectId?: string) => req<{ fetched: number; created: number }>('POST', `/api/connectors/${source}/sync`, { projectId }),
   testConnector: (source: TicketSource) => req<{ message: string }>('POST', `/api/connectors/${source}/test`),
-  demo: () => req('POST', '/api/demo'),
+  demo: (projectId?: string) => req('POST', '/api/demo', { projectId }),
+  scope: (body: { text: string; projectId?: string; answers?: Array<{ q: string; a: string }> }) =>
+    req<{ title: string; description: string; priority: Ticket['priority']; labels: string[]; questions: string[] }>('POST', '/api/scope', body),
+  rules: (projectId: string) => req<{ text: string; where: string; inRepo: boolean; suggestions: Array<{ text: string; ticket: string; ts: number }> }>('GET', `/api/projects/${projectId}/rules`),
+  saveRules: (projectId: string, text: string) => req<{ text: string; where: string; inRepo: boolean }>('PUT', `/api/projects/${projectId}/rules`, { text }),
+  previewStart: (id: string) => req('POST', `/api/tickets/${id}/preview/start`),
+  previewStop: (id: string) => req('POST', `/api/tickets/${id}/preview/stop`),
+  previewLogs: (id: string) => req<string[]>('GET', `/api/tickets/${id}/preview/logs`),
+  files: (id: string) => req<{ changed: string[]; files: string[]; live: boolean }>('GET', `/api/tickets/${id}/files`),
+  file: (id: string, path: string) => req<{ path: string; content: string; fromDiff?: boolean; tooLarge?: boolean; binary?: boolean }>('GET', `/api/tickets/${id}/file?path=${encodeURIComponent(path)}`),
+  openEditor: (id: string) => req<{ opened: string }>('POST', `/api/tickets/${id}/open-editor`),
+  artifactUrl: (ticketId: string, artifactId: string) => `/api/tickets/${ticketId}/artifacts/${artifactId}`,
+  testNotification: () => req('POST', '/api/notifications/test'),
+  report: (range: 'day' | 'week', projectId?: string) => req<Report>('GET', `/api/reports?range=${range}${projectId ? `&projectId=${projectId}` : ''}`),
+  reportToSlack: (range: 'day' | 'week', projectId?: string) => req<Report>('POST', '/api/reports/slack', { range, projectId }),
   resolve: (id: string, body: { option?: string; text?: string; verdicts?: CaseVerdict[]; notes?: string }) => req('POST', `/api/attention/${id}/resolve`, body),
   harvestStatus: (force = false) => req<HarvestStatus>('GET', `/api/harvest/status${force ? '?force=1' : ''}`),
   harvestProjects: () => req<HarvestProject[]>('GET', '/api/harvest/projects'),

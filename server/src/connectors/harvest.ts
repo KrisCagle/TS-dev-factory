@@ -41,7 +41,10 @@ export interface HarvestEntry {
 
 /** Local date (not UTC) — Harvest's spent_date is the user's calendar day. */
 export function today() {
-  const d = new Date();
+  return isoDay(new Date());
+}
+
+export function isoDay(d: Date) {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
@@ -91,6 +94,13 @@ export const harvest = {
       headers: headers(s),
       json: { project_id: projectId, task_id: taskId, spent_date: today(), hours, notes },
     });
+  },
+
+  async entriesBetween(s: Settings, from: string, to: string) {
+    const key = `${s.harvest.accountId}:${(s.harvest.token || '').slice(-6)}`;
+    if (meCache?.key !== key) meCache = { key, id: (await harvest.me(s)).id };
+    const r = await http<{ time_entries: HarvestEntry[] }>(`${BASE}/time_entries?from=${from}&to=${to}&user_id=${meCache.id}&per_page=2000`, { headers: headers(s) });
+    return r.time_entries;
   },
 
   async todayEntries(s: Settings) {

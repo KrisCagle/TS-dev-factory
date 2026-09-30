@@ -66,3 +66,21 @@ export async function removeWorktree(repoPath: string, dir: string) {
 export async function pushBranch(dir: string, branch: string) {
   await git(dir, 'push', '-u', 'origin', branch);
 }
+
+/** Keep the factory's own scratch folder (screenshots etc.) out of the ticket's commits. */
+export async function excludeFactoryDir(dir: string) {
+  try {
+    const common = await git(dir, 'rev-parse', '--git-common-dir');
+    const file = path.resolve(dir, common, 'info', 'exclude');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const cur = fs.existsSync(file) ? fs.readFileSync(file, 'utf8') : '';
+    if (!cur.split('\n').includes('.factory/')) fs.appendFileSync(file, `${cur.endsWith('\n') || !cur ? '' : '\n'}.factory/\n`);
+  } catch {
+    /* not fatal */
+  }
+}
+
+export async function listFiles(dir: string) {
+  const out = await git(dir, 'ls-files');
+  return out ? out.split('\n') : [];
+}

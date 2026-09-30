@@ -23,6 +23,7 @@ export interface Prefs {
   groupBy: 'none' | 'priority' | 'source';
   defaultView: View;
   knownColumns?: Stage[];
+  activeProject: string;                              // 'all' or a project id
   office: {
     looks: Partial<Record<AgentRole | 'pm', CharacterLook>>;
     zones: Record<string, ZonePos>;                   // user-dragged zone positions
@@ -33,7 +34,7 @@ export interface Prefs {
   };
 }
 
-export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'settings';
+export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'reports' | 'rules' | 'settings';
 
 export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed'];
 
@@ -46,6 +47,7 @@ const DEFAULTS: Prefs = {
   widgets: { throughput: true, inFlight: true, awaiting: true, cost: true, cycle: true, loops: false, harvest: true },
   groupBy: 'none',
   defaultView: 'office',
+  activeProject: 'all',
   office: { looks: {}, zones: {}, showBubbles: true, showFeed: true, speed: 1, pmName: 'You' },
 };
 

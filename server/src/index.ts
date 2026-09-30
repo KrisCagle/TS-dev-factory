@@ -7,6 +7,13 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { CONNECTORS, connectorFor } from './connectors/index.js';
 import { harvest } from './connectors/harvest.js';
 import { HarvestService } from './harvest-service.js';
+import { Artifacts } from './artifacts.js';
+import { FileBrowser } from './files.js';
+import { Notifier } from './notifier.js';
+import { Previews } from './previews.js';
+import { Reports, type Range } from './reports.js';
+import { Rules } from './rules.js';
+import { Scoper } from './scoper.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
@@ -17,9 +24,27 @@ const DATA = process.env.FACTORY_DATA ?? path.resolve(__dirname, '../../.factory
 
 const store = new Store(DATA);
 if (process.env.FACTORY_MODE === 'live' || process.env.FACTORY_MODE === 'mock') store.updateSettings({ mode: process.env.FACTORY_MODE });
-if (process.env.FACTORY_REPO) store.updateSettings({ repoPath: process.env.FACTORY_REPO });
+if (process.env.FACTORY_REPO) {
+  const s0 = store.settings();
+  store.updateSettings({ projects: s0.projects.map((p) => (p.id === s0.defaultProjectId ? { ...p, repoPath: process.env.FACTORY_REPO! } : p)) });
+}
 const harvestSvc = new HarvestService(store);
 const orch = new Orchestrator(store, harvestSvc);
+const rules = new Rules(store);
+const previews = new Previews(store);
+const files = new FileBrowser(store);
+const artifacts = new Artifacts(store);
+const scoper = new Scoper(store);
+// the websocket server is created further down; notifications go through this late-bound broadcaster
+let broadcastLate: (msg: unknown) => void = () => undefined;
+const notifier = new Notifier(store, (m) => broadcastLate(m));
+const reports = new Reports(store, notifier);
+orch.hooks = {
+  rulesFor: (projectId) => rules.forPrompt(projectId),
+  onFinished: (ticketId) => previews.stop(ticketId),
+  afterTester: (ticketId, cwd) => artifacts.collect(ticketId, cwd),
+  afterReview: (ticketId) => artifacts.link(ticketId),
+};
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -75,6 +100,7 @@ app.post('/api/tickets', wrap((req) => {
     description: b.description ?? '',
     priority: (b.priority ?? 'medium') as Priority,
     labels: b.labels ?? [],
+    projectId: b.projectId,
     stage: b.stage === 'ready' ? 'ready' : 'backlog',
   });
 }));
@@ -121,6 +147,35 @@ app.post('/api/tickets/:id/notes', wrap((req) => {
   store.log({ ticketId: req.params.id, agent: 'pm', kind: 'pm', text: `Note: ${req.body?.text}` });
 }));
 
+// ---------------------------------------------------------------- projects: house rules
+app.get('/api/projects/:id/rules', wrap((req) => ({ ...rules.get(req.params.id), suggestions: rules.suggestions(req.params.id) })));
+app.put('/api/projects/:id/rules', wrap((req) => rules.set(req.params.id, String(req.body?.text ?? ''))));
+
+// ---------------------------------------------------------------- previews, files, artifacts
+app.post('/api/tickets/:id/preview/start', wrap((req) => previews.start(req.params.id)));
+app.post('/api/tickets/:id/preview/stop', wrap((req) => previews.stop(req.params.id)));
+app.get('/api/tickets/:id/preview/logs', wrap((req) => previews.logs(req.params.id)));
+app.get('/api/tickets/:id/files', wrap((req) => files.list(req.params.id)));
+app.get('/api/tickets/:id/file', wrap((req) => files.read(req.params.id, String(req.query.path ?? ''))));
+app.post('/api/tickets/:id/open-editor', wrap((req) => files.openInEditor(req.params.id)));
+app.get('/api/tickets/:id/artifacts/:aid', (req, res, next) => {
+  try {
+    res.sendFile(artifacts.file(req.params.id, req.params.aid));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------- ticket writer
+app.post('/api/scope', wrap((req) => scoper.draft(req.body ?? {})));
+
+// ---------------------------------------------------------------- notifications & reports
+app.post('/api/notifications/test', wrap(() => {
+  notifier.notify({ event: 'needsYou', title: '🔔 Test notification', body: 'Notifications from AI Dev Factory are working.' }, { force: true });
+}));
+app.get('/api/reports', wrap((req) => reports.build((req.query.range === 'week' ? 'week' : 'day') as Range, (req.query.projectId as string) || undefined)));
+app.post('/api/reports/slack', wrap((req) => reports.postToSlack(req.body?.range === 'week' ? 'week' : 'day', req.body?.projectId || undefined)));
+
 // ---------------------------------------------------------------- the PM's inbox
 app.get('/api/attention', wrap(() => store.attention()));
 app.post('/api/attention/:id/resolve', wrap((req) => orch.resolve(req.params.id, req.body ?? {})));
@@ -160,7 +215,7 @@ app.post('/api/connectors/:source/sync', wrap(async (req) => {
       if (['backlog', 'ready'].includes(existing.stage)) store.updateTicket(existing.id, { title: it.title, description: it.description, priority: it.priority, labels: it.labels });
       continue;
     }
-    store.createTicket({ ...it, source: c.source, stage: 'backlog' });
+    store.createTicket({ ...it, source: c.source, stage: 'backlog', projectId: (req.body?.projectId as string | undefined) ?? undefined });
     created++;
   }
   return { fetched: incoming.length, created };
@@ -173,7 +228,7 @@ app.post('/api/connectors/:source/test', wrap(async (req) => {
 }));
 
 // ---------------------------------------------------------------- demo data
-app.post('/api/demo', wrap(() => {
+app.post('/api/demo', wrap((req) => {
   const demo: Array<[string, Priority, string, string[]]> = [
     ['Add dark mode toggle to settings page', 'high', 'Users want a dark theme. Persist choice per user and respect the OS preference by default.', ['frontend', 'ux']],
     ['Rate-limit the public /search endpoint', 'urgent', 'We are getting scraped. 60 req/min per IP, return 429 with Retry-After.', ['backend', 'security']],
@@ -182,7 +237,8 @@ app.post('/api/demo', wrap(() => {
     ['Upgrade logger and remove console.log calls', 'low', 'Replace stray console.log with the structured logger.', ['chore']],
     ['Password reset emails expire too fast', 'high', 'Token TTL is 5 minutes; should be 60. Add a test.', ['bug', 'auth']],
   ];
-  demo.forEach(([title, priority, description, labels], i) => store.createTicket({ title, priority, description, labels, stage: i < 4 ? 'ready' : 'backlog' }));
+  const projectId = req.body?.projectId as string | undefined;
+  demo.forEach(([title, priority, description, labels], i) => store.createTicket({ title, priority, description, labels, projectId, stage: i < 4 ? 'ready' : 'backlog' }));
 }));
 
 // ---------------------------------------------------------------- static web build
@@ -203,6 +259,7 @@ const broadcast = (msg: unknown) => {
   const data = JSON.stringify(msg);
   for (const c of wss.clients) if (c.readyState === WebSocket.OPEN) c.send(data);
 };
+broadcastLate = broadcast;
 let statsTimer: NodeJS.Timeout | null = null;
 const pushStats = () => {
   if (statsTimer) return;
@@ -218,12 +275,14 @@ store.on('attention', (attention) => { broadcast({ type: 'attention', attention 
 
 server.listen(PORT, () => {
   orch.start();
+  reports.startSchedule();
   const s = store.settings();
-  console.log(`\n🏭 AI Dev Factory on http://localhost:${PORT}  (mode: ${s.mode}${s.repoPath ? `, repo: ${s.repoPath}` : ''})\n`);
+  console.log(`\n🏭 AI Dev Factory on http://localhost:${PORT}  (mode: ${s.mode}, ${s.projects.length} project${s.projects.length === 1 ? '' : 's'})\n`);
 });
 
 const shutdown = () => {
   orch.stop();
+  previews.stopAll();
   store.flush();
   process.exit(0);
 };

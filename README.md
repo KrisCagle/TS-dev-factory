@@ -17,6 +17,14 @@ A software factory where Claude agents work your tickets and you run the floor a
 - **CI-aware merge gate** 🚦: with pull requests, the factory opens the PR before your sign-off and holds the sign-off until the required checks are green. Red CI goes back to the Coder, not to you. When you approve, the PR is merged with squash, merge or rebase, whichever you pick.
 - **Watchdog** ⏰: an agent that goes quiet (for example, a hung command or a wait that never ends) is restarted with a nudge. You only hear about it if nudging doesn't work. The board is also reconciled continuously, so a ticket's stage always matches what's actually happening.
 - **Harvest time tracking** ⏱: tracks your PM time. When you open something that needs you, a timer starts on the ticket's Harvest project, and it stops when you decide. You can also log hours manually per ticket. Today's total and the running timer sit in the top bar.
+- **Projects** 📁: run several repos or clients from one factory. Each project has its own ticket prefix (`WING-12`), repo, base branch, shipping rule, live-preview command and Harvest project. Switch projects from the top bar, or view them all together.
+- **Ticket writer** ✨: type a rough idea, bug report or pasted Slack thread and the Scoper agent turns it into a ticket with a clear title, context and acceptance criteria. It asks at most a couple of questions, and you can skip them.
+- **Live preview** ▶: run your app from a ticket's own branch copy on its own port (for example `npm run dev -- --port $PORT`), so you can click through the change before signing off. Start it from the ticket drawer or the review walkthrough.
+- **Code viewer**: a Files tab in each ticket shows the changed files first with added lines highlighted, lets you browse the rest, and has **Open in VS Code** to take over by hand.
+- **Screenshots in reviews** 📸: the Tester saves screenshots, and they're attached to the matching walkthrough cases so you can see the result before trying it yourself.
+- **House rules** 📐: edit the conventions every agent follows. They're saved to the repo's `CLAUDE.md`, and feedback you keep giving on tickets is suggested as new rules.
+- **Notifications** 🔔: Mac notifications, browser notifications and Slack when something needs you, CI fails, an agent is stuck, or a ticket ships or fails. Every channel and event can be switched off, with quiet hours.
+- **Standup and weekly report** 📊: shipped, in progress, waiting on you, blocked, agent spend and Harvest hours. Copy it as Markdown, post it to Slack, or have the standup posted every weekday.
 - **Ticket sources**: a built-in board plus **GitHub Issues, Linear and Jira**. Tickets are imported into Backlog, and progress is sent back to the tracker as comments and status changes.
 - **Shipping**: when you approve, the change is merged locally, pushed as a GitHub PR, or left on the branch. You choose which in Settings.
 - **The Office** 🏢: a live, top-down animated office. Each agent is a character. They pull tickets off the Ticket Wall and carry them desk to desk on each handoff. When review or tests send work back, they meet at the Huddle table. Finished work goes to your PM inbox, and approved work launches from the Ship Dock. Speech bubbles show which tool each agent is running as it happens.
@@ -51,17 +59,23 @@ For development with hot reload: `npm run dev`, then open http://localhost:5173.
 | Board | Hand-off to the ship dock |
 | --- | --- |
 | ![Kanban board](screenshots/board-light.png) | ![PM carries an approved ticket to the rocket](screenshots/ship-dock-launch.png) |
+| **Review walkthrough with screenshots** | **Daily standup** |
+| ![A walkthrough case with its screenshot](screenshots/walkthrough.png) | ![Standup report](screenshots/reports.png) |
 
 ![Agents passing tickets desk to desk](screenshots/office-handoff-sequence.png)
 
 ## Going live
 
 1. Authenticate the Claude Agent SDK by setting `ANTHROPIC_API_KEY` in the server's environment (for example `export ANTHROPIC_API_KEY=sk-ant-…` before `npm start`).
-2. Open **Settings** and set the **Repository path** (a local git repo) and the **Base branch**, then switch the factory mode to **Live**.
-3. Choose what **Approve** does: merge locally, open a PR (needs the GitHub connector), or leave the branch.
+2. Open **Settings → Projects** and set the project's **Repository path** (a local git repo) and **Base branch**, then switch the factory mode to **Live**. Add a project for each repo you want the factory to work on.
+3. Choose what **Approve** does for each project: merge locally, open a PR (needs the GitHub connector), or leave the branch.
 4. Set a **Budget per ticket**. Agents stop and escalate to you when they reach it.
 
-Agents load your repo's `CLAUDE.md`, so put team conventions there.
+Agents load your repo's `CLAUDE.md`, so put team conventions there. You can edit it from **House rules**.
+
+**Live preview:** set a preview command per project in Settings → Projects. `$PORT` is replaced with a free port (from 5300 up), and the command runs inside the ticket's branch copy, so install dependencies there the way your project needs.
+
+**Notifications:** Mac notifications come from the factory server via `osascript`. For Slack, create an incoming webhook and paste it in Settings → Notifications; the same webhook is used for the daily standup.
 
 Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`.
 
@@ -84,6 +98,13 @@ server/src
   orchestrator.ts     scheduler + pipeline (plan → code → test → review → CI → gates → ship), watchdog, reconcile
   attention.ts        the PM inbox: decision briefs, sign-off walkthroughs, escalations
   harvest-service.ts  PM time tracking (timers + manual entries)
+  scoper.ts           ticket writer (rough idea → ticket with acceptance criteria)
+  previews.ts         live preview per ticket
+  files.ts            code viewer + open in VS Code
+  artifacts.ts        screenshots attached to reviews
+  rules.ts            house rules (CLAUDE.md)
+  notifier.ts         Mac / browser / Slack notifications
+  reports.ts          standup and weekly report
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools
@@ -92,30 +113,21 @@ server/src
   store.ts            JSON-file store
 web/src
   views/office/       animated office (layout, simulation, sprites)
-  views/              Board, Agents, Activity, Settings
+  views/              Inbox, Board, Reports, House rules, Agents, Activity, Settings
   components/         ticket drawer, diff viewer, command palette
 ```
 
 ## Roadmap
 
-Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, and Harvest time tracking.
+Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, and standup/weekly reports.
 
 **Next up** ⭐
 
-- **Multiple repos and projects**: a board, settings, Harvest project and office floor for each repo or client, with a switcher at the top.
-- **Live preview per ticket**: run the app from the ticket's branch copy on its own port, so the walkthrough's links open the running change.
-- **Ticket writer**: a Scoper agent that turns a rough idea, bug report or Slack thread into a ticket with acceptance criteria, and asks you only what's unclear.
-- **Notifications**: desktop and Slack pings when something needs you, CI keeps failing, or a ticket ships.
-
-**Later**
-
-- **Open in VS Code**: open the ticket's branch copy in VS Code to take over by hand, then hand it back to the agents.
-- **Screenshots and recordings in reviews**: the Tester attaches Playwright before/after captures to walkthrough cases.
-- **Repo house rules**: edit the repo's `CLAUDE.md` in the UI, and let review feedback suggest new rules.
-- **Daily standup and weekly report**: shipped, waiting on you, blocked, spend and Harvest hours, ready to share.
 - **Spend dashboard**: cost per ticket, agent and project over time, with a daily cap that pauses the factory.
 - **Dependencies and parallel planning**: "B waits on A", and never running two tickets that touch the same files at once.
 - **Office replay**: scrub back through a ticket's day in the office view.
+- **Recordings in reviews**: short Playwright videos next to the screenshots.
+- **Hand back from VS Code**: after editing a ticket's branch by hand, send it back to the Tester and Reviewer.
 
 **Platform**
 

@@ -1,11 +1,22 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type FactoryStatus, type ServerState, type Stats } from './api';
-import type { AgentConfig, AttentionItem, LogEvent, Settings, Ticket } from './types';
+import type { AgentConfig, AttentionItem, LogEvent, Project, Settings, Ticket } from './types';
+import { usePrefs } from './prefs';
+
+export interface Notice { event: string; title: string; body: string; ticketId?: string }
 
 interface FactoryState {
   ready: boolean;
   connected: boolean;
+  /** tickets in the selected project (or all) */
   tickets: Ticket[];
+  allTickets: Ticket[];
+  projects: Project[];
+  /** the selected project, or undefined for "All projects" */
+  project?: Project;
+  /** where new tickets go: the selected project, else the default one */
+  targetProjectId: string;
+  onNotice: (fn: (n: Notice) => void) => () => void;
   attention: AttentionItem[];
   /** open items the PM can act on right now */
   needsYou: AttentionItem[];
@@ -30,6 +41,8 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
   const [logs, setLogs] = useState<LogEvent[]>([]);
   const [connected, setConnected] = useState(false);
   const listeners = useRef(new Set<(e: LogEvent) => void>());
+  const noticeListeners = useRef(new Set<(n: Notice) => void>());
+  const { prefs } = usePrefs();
 
   const refresh = async () => {
     const [state, l] = await Promise.all([api.state(), api.logs(MAX_LOGS)]);
@@ -66,6 +79,9 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
             setLogs((p) => (p.length >= MAX_LOGS ? [...p.slice(-MAX_LOGS + 1), msg.event] : [...p, msg.event]));
             listeners.current.forEach((fn) => fn(msg.event));
             break;
+          case 'notify':
+            noticeListeners.current.forEach((fn) => fn(msg.notice));
+            break;
           case 'attention':
             setS((p) => p && { ...p, attention: msg.attention });
             break;
@@ -92,28 +108,41 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const value = useMemo<FactoryState>(
-    () => ({
+  const value = useMemo<FactoryState>(() => {
+    const projects = s?.settings.projects ?? [];
+    const project = projects.find((p) => p.id === prefs.activeProject);
+    const all = s?.tickets ?? [];
+    const tickets = project ? all.filter((t) => t.projectId === project.id) : all;
+    const ids = new Set(tickets.map((t) => t.id));
+    const attention = (s?.attention ?? []).filter((a) => !project || (a.ticketId && ids.has(a.ticketId)));
+    return {
       ready: !!s,
       connected,
-      tickets: s?.tickets ?? [],
-      attention: s?.attention ?? [],
-      needsYou: (s?.attention ?? []).filter((a) => a.status === 'open').sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.createdAt - b.createdAt),
+      tickets,
+      allTickets: all,
+      projects,
+      project,
+      targetProjectId: project?.id ?? s?.settings.defaultProjectId ?? 'default',
+      onNotice: (fn) => {
+        noticeListeners.current.add(fn);
+        return () => noticeListeners.current.delete(fn);
+      },
+      attention,
+      needsYou: attention.filter((a) => a.status === 'open').sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.createdAt - b.createdAt),
       agents: s?.agents ?? [],
       settings: s?.settings ?? null,
       factory: s?.factory ?? { running: [], paused: false },
       stats: s?.stats ?? null,
       connectors: s?.connectors ?? [],
       hasApiKey: s?.hasApiKey ?? false,
-      logs,
+      logs: project ? logs.filter((l) => ids.has(l.ticketId)) : logs,
       onLog: (fn) => {
         listeners.current.add(fn);
         return () => listeners.current.delete(fn);
       },
       refresh,
-    }),
-    [s, logs, connected],
-  );
+    };
+  }, [s, logs, connected, prefs.activeProject]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

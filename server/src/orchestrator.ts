@@ -10,6 +10,7 @@ import { PLAN_SCHEMA, REVIEW_SCHEMA, TEST_SCHEMA, coderPrompt, plannerPrompt, re
 import type { Store } from './store.js';
 import {
   PRIORITY_RANK,
+  type Settings,
   type AgentRole, type AttentionItem, type CaseVerdict, type CiCheck, type CheckState, type Plan, type Review, type Stage, type TestReport, type Ticket,
 } from './types.js';
 
@@ -51,6 +52,9 @@ export class Orchestrator {
   paused = false;
   private shuttingDown = false;
 
+  /** Extension points used by other services (previews, artifacts). */
+  hooks: { rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
+
   constructor(private store: Store, private harvest: HarvestService) {
     // Anything mid-flight when the server stopped goes back in the queue.
     for (const t of store.tickets()) {
@@ -81,6 +85,22 @@ export class Orchestrator {
   setPaused(p: boolean) {
     this.paused = p;
     this.store.emit('factory', this.status());
+  }
+
+  /**
+   * Settings as seen by one ticket: repo, branch, merge strategy and GitHub repo come from its project.
+   */
+  private ps(t: Ticket): Settings {
+    const s = this.store.settings();
+    const p = this.store.project(t.projectId);
+    return {
+      ...s,
+      repoPath: p.repoPath,
+      baseBranch: p.baseBranch || 'main',
+      worktreesDir: p.worktreesDir,
+      mergeStrategy: p.mergeStrategy,
+      connectors: p.githubRepo ? { ...s.connectors, github: { ...s.connectors.github, repo: p.githubRepo } } : s.connectors,
+    };
   }
 
   private get runner(): AgentRunner {
@@ -217,6 +237,7 @@ export class Orchestrator {
   }
 
   private park(id: string) {
+    this.hooks.onFinished?.(id);
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
     this.store.updateTicket(id, { stage: 'backlog', gate: undefined, activeAgent: undefined, error: undefined });
@@ -264,6 +285,7 @@ export class Orchestrator {
           const r = await this.runAgent(id, 'tester', testerPrompt(t), cwd, ac.signal, TEST_SCHEMA);
           const report = normalizeTest(r.structured, r.text);
           t = set({ testReport: report });
+          await this.hooks.afterTester?.(id, cwd).catch(() => undefined);
           await this.commit(t, cwd, `${t.key}: tests`);
           this.log(id, 'tester', 'result', `${report.passed ? '✅ Tests passed' : '❌ Tests failed'} — ${report.summary}`);
           if (!report.passed) {
@@ -284,6 +306,7 @@ export class Orchestrator {
             this.loopBack(id, 'Reviewer requested changes');
             continue;
           }
+          await this.hooks.afterReview?.(id).catch(() => undefined);
         }
         break;
       }
@@ -291,7 +314,7 @@ export class Orchestrator {
       t = set({ diff: await this.diff(this.store.ticket(id)!, cwd), activeAgent: undefined });
 
       // ---- CI gate: open/update the PR and hold sign-off until checks are green
-      if (this.ciApplies()) {
+      if (this.ciApplies(this.store.ticket(id)!)) {
         await this.openOrUpdatePR(id);
         t = set({ stage: 'ci', ci: { state: 'pending', checks: [], since: Date.now(), updatedAt: Date.now() } });
         this.ciPolled.delete(id);
@@ -363,6 +386,8 @@ export class Orchestrator {
     const agent = this.store.agent(role);
     const s = this.store.settings();
     const maxNudges = s.watchdog.enabled ? s.watchdog.maxNudges : 0;
+    const rules = this.hooks.rulesFor?.(this.store.ticket(id)!.projectId);
+    if (rules) prompt = `## House rules for this project — follow them\n${rules}\n\n${prompt}`;
     this.store.updateTicket(id, { activeAgent: role });
     this.log(id, role, 'status', `${agent.name} started`);
 
@@ -452,16 +477,16 @@ export class Orchestrator {
   }
 
   // ------------------------------------------------------------------ CI gate
-  private ciApplies() {
-    const s = this.store.settings();
+  private ciApplies(t: Ticket) {
+    const s = this.ps(t);
     if (!s.ciGate.enabled) return false;
     if (s.mode === 'mock') return true; // simulated CI so the flow can be tried end to end
     return s.mergeStrategy === 'pull-request' && github.isEnabled(s);
   }
 
   private async openOrUpdatePR(id: string) {
-    const s = this.store.settings();
     const t = this.store.ticket(id)!;
+    const s = this.ps(t);
     if (s.mode === 'mock') {
       if (!t.prNumber) this.store.updateTicket(id, { prNumber: 100 + Math.floor(Math.random() * 900) });
       return;
@@ -488,7 +513,7 @@ export class Orchestrator {
       if (Date.now() - (this.ciPolled.get(t.id) ?? 0) < interval) continue;
       this.ciPolled.set(t.id, Date.now());
       try {
-        const r = s.mode === 'mock' ? this.mockChecks(t) : await github.prChecks(s, t.prNumber!);
+        const r = s.mode === 'mock' ? this.mockChecks(t) : await github.prChecks(this.ps(t), t.prNumber!);
         if ('merged' in r && r.merged) {
           this.log(t.id, 'factory', 'status', `PR #${t.prNumber} was merged outside the factory.`);
           await this.markDone(t.id, t.prUrl);
@@ -547,6 +572,7 @@ export class Orchestrator {
       });
       this.store.closeAttentionFor(id, 'merge');
       this.log(id, 'factory', 'status', `❌ CI failed (${failed.map((c) => c.name).join(', ')}) — back to the Coder, not to you.`);
+      this.store.emit('notify', { event: 'ciFailed', ticketId: id, title: `CI failed on ${t.key}`, body: `${failed.map((c) => c.name).join(', ')} — sent back to the Coder.` });
       if (iterations >= s.maxLoops) {
         const e = this.store.updateTicket(id, { stage: 'awaiting_approval', gate: 'merge' })!;
         this.store.postAttention(A.escalation(e, `CI kept failing after ${iterations} loops.`));
@@ -570,14 +596,15 @@ export class Orchestrator {
 
   // ------------------------------------------------------------------ git / workspace
   private async workspace(t: Ticket): Promise<string> {
-    const s = this.store.settings();
+    const s = this.ps(t);
     if (s.mode === 'mock') return process.cwd();
     if (!s.repoPath || !(await g.isGitRepo(s.repoPath))) {
-      throw new Error('Live mode needs a git repository — set "Repository path" in Settings.');
+      throw new Error(`Live mode needs a git repository — set the repository path for project "${this.store.project(t.projectId).name}" in Settings → Projects.`);
     }
     const root = g.worktreesRoot(s.repoPath, s.worktreesDir);
     const { branch, dir } = await g.ensureWorktree(s.repoPath, root, s.baseBranch, t.key, t.title);
     if (t.worktree !== dir) {
+      await g.excludeFactoryDir(dir);
       this.store.updateTicket(t.id, { branch, worktree: dir });
       this.log(t.id, 'factory', 'status', `Workspace ready on branch ${branch}`);
     }
@@ -590,19 +617,20 @@ export class Orchestrator {
   }
 
   private async diff(t: Ticket, cwd: string) {
-    const s = this.store.settings();
+    const s = this.ps(t);
     if (s.mode === 'mock') return mockDiff(t.key, t.title);
     return g.diffAgainstBase(cwd, s.baseBranch);
   }
 
   private async finalize(id: string) {
-    const s = this.store.settings();
+    this.hooks.onFinished?.(id); // stop its preview before the worktree goes away
     const t = this.store.ticket(id)!;
+    const s = this.ps(t);
     try {
       let prUrl = t.prUrl;
       if (s.mode === 'live' && t.branch && t.worktree) {
         await g.commitAll(t.worktree, `${t.key}: final touches`);
-        if (t.prNumber && this.ciApplies()) {
+        if (t.prNumber && this.ciApplies(t)) {
           // The CI gate already opened the PR — shipping means merging it.
           await github.mergePR(s, t.prNumber, s.ciGate.mergeMethod, `${t.key}: ${t.title} (#${t.prNumber})`);
           this.log(id, 'factory', 'status', `Merged PR #${t.prNumber} (${s.ciGate.mergeMethod})`);
@@ -629,8 +657,9 @@ export class Orchestrator {
   }
 
   private async markDone(id: string, prUrl?: string) {
-    const s = this.store.settings();
     const t = this.store.ticket(id)!;
+    const s = this.ps(t);
+    this.hooks.onFinished?.(id);
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
     const done = this.store.updateTicket(id, { stage: 'done', gate: undefined, activeAgent: undefined, finishedAt: Date.now(), prUrl, worktree: s.mergeStrategy === 'none' ? t.worktree : undefined })!;
@@ -641,7 +670,7 @@ export class Orchestrator {
   private async sync(t: Ticket, stage: Stage, message: string) {
     if (t.source === 'local') return;
     const c = connectorFor(t.source);
-    const s = this.store.settings();
+    const s = this.ps(t);
     if (!c || !c.isEnabled(s)) return;
     try {
       await c.onStage(s, t, stage, message);
@@ -672,7 +701,7 @@ function normalizeReview(x: unknown, text: string): Review {
   const w = (o.walkthrough ?? undefined) as Record<string, unknown> | undefined;
   const cases = Array.isArray(w?.cases)
     ? (w!.cases as Array<Record<string, unknown>>)
-        .map((c) => ({ title: String(c.title ?? ''), steps: arr(c.steps), expect: String(c.expect ?? '') }))
+        .map((c) => ({ title: String(c.title ?? ''), steps: arr(c.steps), expect: String(c.expect ?? ''), screenshot: c.screenshot ? String(c.screenshot) : undefined }))
         .filter((c) => c.title && c.expect)
         .slice(0, 8)
     : [];

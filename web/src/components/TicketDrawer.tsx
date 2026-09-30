@@ -9,8 +9,10 @@ import { AgentPill } from './Bits';
 import { DecisionCard } from './Attention';
 import { Diff } from './Diff';
 import { HarvestPanel } from './HarvestPanel';
+import { FileViewer, PreviewControls } from './FileViewer';
+import { ProjectTag } from './Bits';
 
-type Tab = 'overview' | 'live' | 'diff' | 'quality';
+type Tab = 'overview' | 'live' | 'diff' | 'files' | 'quality';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { tickets, logs: allLogs, agents, attention } = useFactory();
@@ -69,6 +71,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
         <div className="drawer-h">
           <div className="row small muted">
             <span className="mono">{t.key}</span>
+            <ProjectTag projectId={t.projectId} />
             <span>·</span>
             <span>{STAGE_META[t.stage].icon} {STAGE_META[t.stage].label}</span>
             {t.activeAgent && live && <AgentPill role={t.activeAgent} live />}
@@ -86,6 +89,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
             {live && <button className="btn danger" disabled={busy} onClick={() => act(() => api.cancel(t.id), 'Cancelled')}>■ Stop agents</button>}
             {t.stage === 'failed' && <button className="btn primary" disabled={busy} onClick={() => act(() => api.retry(t.id), 'Re-queued')}>↻ Retry</button>}
             {t.prUrl && <a className="btn" href={t.prUrl} target="_blank" rel="noreferrer">View PR ↗</a>}
+            {(t.worktree || t.preview) && <PreviewControls t={t} compact />}
             <span style={{ flex: 1 }} />
             <button className="btn ghost sm danger" onClick={() => confirm(`Delete ${t.key}?`) && act(async () => { await api.deleteTicket(t.id); onClose(); }, 'Deleted')}>Delete</button>
           </div>
@@ -98,9 +102,9 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
         )}
 
         <nav className="tabs">
-          {(['overview', 'live', 'diff', 'quality'] as Tab[]).map((k) => (
+          {(['overview', 'live', 'diff', 'files', 'quality'] as Tab[]).map((k) => (
             <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-              {{ overview: 'Overview', live: `Agent log${live ? ' ●' : ''}`, diff: 'Diff', quality: 'Tests & review' }[k]}
+              {{ overview: 'Overview', live: `Agent log${live ? ' ●' : ''}`, diff: 'Diff', files: 'Files', quality: 'Tests & review' }[k]}
             </button>
           ))}
         </nav>
@@ -157,8 +161,22 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
 
           {tab === 'live' && <LogView logs={logs} color={color} />}
           {tab === 'diff' && <Diff text={t.diff ?? ''} />}
+          {tab === 'files' && <FileViewer t={t} />}
           {tab === 'quality' && (
             <>
+              {(t.artifacts?.length ?? 0) > 0 && (
+                <div>
+                  <strong>📸 Screenshots</strong>
+                  <div className="shots">
+                    {t.artifacts!.map((a) => (
+                      <a key={a.id} href={api.artifactUrl(t.id, a.id)} target="_blank" rel="noreferrer" title={a.caption ?? a.name}>
+                        <img src={api.artifactUrl(t.id, a.id)} alt={a.caption ?? a.name} />
+                        <span className="small muted">{a.caption ?? a.name}</span>
+                      </a>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div>
                 <strong>🧪 Tests</strong>
                 {t.testReport ? (
