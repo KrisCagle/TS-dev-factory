@@ -87,10 +87,24 @@ export class Scoper {
 /** Simulated-mode stand-in: shapes the input into the same structure without calling Claude. */
 function heuristic(text: string, answers?: ScopeInput['answers']): ScopeDraft {
   const lower = text.toLowerCase();
-  const first = text.split(/(?<=[.!?])\s|\n/)[0].replace(/^(please|can we|could we|we need to|i want to|we should)\s+/i, '').trim();
-  let title = first.charAt(0).toUpperCase() + first.slice(1);
-  if (title.length > 70) title = `${title.slice(0, 67).replace(/\s+\S*$/, '')}…`;
-  title = title.replace(/[.?!]+$/, '');
+  const first = text.split(/(?<=[.!?])\s|\n/)[0]
+    .replace(/^(please|can we|could we|we need to|i want to|we should)\s+/i, '')
+    // "customers in Europe keep saying (that) the X…" → "the X…": reported speech isn't the problem itself
+    .replace(/^(?:\w+\s+){0,4}?(?:users?|customers?|people|clients?|someone|folks)\b.{0,40}?\b(?:say|says|said|saying|report|reports|reported|reporting|complain|complains|complaining|mention|mentions|noticed?)\s+(?:that\s+)?/i, '')
+    .replace(/,?\s*(?:can|could) (?:we|you) (?:fix|look at|check) (?:it|this|that)\??$/i, '')
+    .trim();
+  // keep the first clause when the sentence goes on ("…shows $ instead of €, and the email…")
+  const clause = first.length > 60 ? first.split(/,\s*(?:and|but|also)?\s*|\s+and\s+(?=the\s)/i)[0] : first;
+  let title = clause.charAt(0).toUpperCase() + clause.slice(1);
+  if (/\b(wrong|broken|doesn'?t|does not|isn'?t|fails?|instead of|missing|error)\b/i.test(lower) && !/^(fix|add|make|show|allow|support|remove|update)\b/i.test(title)) title = `Fix: ${title.charAt(0).toLowerCase()}${title.slice(1)}`;
+  if (title.length > 70) {
+    title = title.slice(0, 70).replace(/\s+\S*$/, '');
+    // don't end on a dangling word ("…when they are in a")
+    while (/\s(?:a|an|the|in|on|at|of|to|for|from|with|when|while|if|they|are|is|and|or|but|that|which)$/i.test(title)) title = title.replace(/\s+\S+$/, '');
+  }
+  title = title.replace(/^(Fix: )?the\s+/i, (_m, fix) => fix ?? '');
+  title = title.charAt(0).toUpperCase() + title.slice(1);
+  title = title.replace(/[.?!,;:]+$/, '');
   const priority: Priority = /outage|down|data loss|security|asap|urgent|crash/.test(lower) ? 'urgent'
     : /bug|broken|error|fails?|can'?t|cannot|wrong/.test(lower) ? 'high'
     : /polish|nice to have|someday|minor|typo/.test(lower) ? 'low' : 'medium';
