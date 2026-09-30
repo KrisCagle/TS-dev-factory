@@ -47,6 +47,7 @@ export interface ReviewCase {
   title: string;
   steps: string[];
   expect: string;
+  screenshot?: string;     // artifact name that illustrates this case
 }
 
 /** What the PM checks before signing off: how to set up, then one case per screen. */
@@ -90,8 +91,45 @@ export interface PmNote {
   ts: number;
 }
 
+/** A screenshot or other file attached to a ticket (shown in the review walkthrough). */
+export interface Artifact {
+  id: string;
+  name: string;
+  file: string;            // stored under the factory data dir
+  caseIndex?: number;      // which walkthrough case it illustrates
+  caption?: string;
+  createdAt: number;
+}
+
+export interface PreviewState {
+  port: number;
+  status: 'starting' | 'running' | 'stopped' | 'error';
+  url: string;
+  error?: string;
+  startedAt: number;
+}
+
+/** One repo the factory works on. */
+export interface Project {
+  id: string;
+  name: string;
+  keyPrefix: string;       // ticket keys, e.g. WING-12
+  color: string;
+  repoPath: string;
+  baseBranch: string;
+  worktreesDir: string;
+  mergeStrategy: 'local-merge' | 'pull-request' | 'none';
+  githubRepo?: string;     // owner/repo — overrides the GitHub connector's repo
+  harvestProjectId?: number;
+  harvestTaskId?: number;
+  previewCommand?: string; // e.g. "npm run dev -- --port $PORT"
+  previewPath?: string;    // e.g. "/" or "/login"
+  rules?: string;          // house rules when the repo has no CLAUDE.md we can write
+}
+
 export interface Ticket {
   id: string;
+  projectId: string;
   key: string;               // FAC-12, GH-34, ENG-101, PROJ-7
   title: string;
   description: string;
@@ -118,6 +156,8 @@ export interface Ticket {
   prNumber?: number;
   ci?: CiStatus;
   harvest?: { projectId?: number; taskId?: number; timer?: HarvestTimer; loggedHours: number };
+  artifacts?: Artifact[];
+  preview?: PreviewState;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -151,8 +191,21 @@ export interface HarvestSettings {
   autoTimer: boolean;      // start a timer when you open a ticket that needs you, stop when you decide
 }
 
+export type NotifyEvent = 'needsYou' | 'ciFailed' | 'shipped' | 'failed' | 'stuck';
+
+export interface NotificationSettings {
+  enabled: boolean;                 // master switch
+  macos: boolean;                   // native notifications from the server (macOS only)
+  browser: boolean;                 // notifications from an open factory tab
+  slack: { enabled: boolean; webhookUrl: string };
+  events: Record<NotifyEvent, boolean>;
+  quietHours: { enabled: boolean; from: string; to: string }; // "18:00" → "08:00"
+}
+
 export interface Settings {
   mode: 'live' | 'mock';
+  projects: Project[];
+  defaultProjectId: string;
   repoPath: string;
   baseBranch: string;
   worktreesDir: string;
@@ -165,6 +218,9 @@ export interface Settings {
   ciGate: { enabled: boolean; pollSeconds: number; mergeMethod: 'squash' | 'merge' | 'rebase'; maxWaitMinutes: number };
   watchdog: { enabled: boolean; stallMinutes: number; maxNudges: number };
   harvest: HarvestSettings;
+  notifications: NotificationSettings;
+  reports: { dailySlack: boolean; dailyTime: string; lastSent?: string };
+  scoper: { model: string };
 }
 
 // ---------------------------------------------------------------- attention (the PM's inbox)
@@ -221,6 +277,7 @@ export interface LogEvent {
 
 export interface DB {
   seq: number;
+  seqs?: Record<string, number>; // last ticket number per key prefix
   tickets: Ticket[];
   agents: AgentConfig[];
   settings: Settings;

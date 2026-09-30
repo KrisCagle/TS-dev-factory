@@ -24,7 +24,7 @@ function palette(dark: boolean) {
 }
 
 export function Office() {
-  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou } = useFactory();
+  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId } = useFactory();
   const { prefs, setOffice } = usePrefs();
   const ui = useUI();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -257,7 +257,7 @@ export function Office() {
             <span className="small muted">Give the team something to do. Tickets you send to the factory get pinned on the Ticket Wall, and the agents take it from there.</span>
             <div className="row" style={{ justifyContent: 'center' }}>
               <button className="btn primary" onClick={() => ui.newTicket('ready')}>＋ New ticket</button>
-              <button className="btn" onClick={() => api.demo()}>🎲 Load demo tickets</button>
+              <button className="btn" onClick={() => api.demo(targetProjectId)}>🎲 Load demo tickets</button>
             </div>
           </div>
         )}

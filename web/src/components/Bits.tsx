@@ -45,6 +45,7 @@ export function TicketCard({ t, draggable, onDragStart, onDragEnd, dragging }: {
       <span className="pri" style={{ background: PRIORITY_META[t.priority].color }} />
       <div className="row">
         <span className="k">{t.key}</span>
+        <ProjectTag projectId={t.projectId} />
         {f.source && t.source !== 'local' && <span className="chip">{SOURCE_META[t.source].icon} {SOURCE_META[t.source].label}</span>}
         <span style={{ marginLeft: 'auto' }} />
         {t.iterations > 0 && <span className="chip" title="Rework loops">🔁 {t.iterations}</span>}
@@ -69,18 +70,26 @@ export function TicketCard({ t, draggable, onDragStart, onDragEnd, dragging }: {
 }
 
 export function Widgets() {
-  const { stats } = useFactory();
+  const { tickets, needsYou, stats } = useFactory();
   const { prefs } = usePrefs();
   const hv = useHarvest();
   if (!stats) return null;
+  // computed from the visible tickets, so the numbers follow the project switcher
+  const done = tickets.filter((t) => t.stage === 'done');
+  const cycles = done.filter((t) => t.startedAt && t.finishedAt).map((t) => t.finishedAt! - t.startedAt!);
+  const inFlight = tickets.filter((t) => ACTIVE_STAGES.includes(t.stage)).length;
+  const inCi = tickets.filter((t) => t.stage === 'ci').length;
+  const reviewed = tickets.filter((t) => t.review);
+  const cost = tickets.reduce((a, t) => a + t.costUsd, 0);
+  const tokens = tickets.reduce((a, t) => a + t.tokens, 0);
   const w = prefs.widgets;
   const items: Array<[boolean, string, string, boolean?]> = [
-    [w.throughput, `${stats.done}`, 'Shipped'],
-    [w.inFlight, `${stats.inFlight}${stats.ci ? ` +${stats.ci}` : ''}`, stats.ci ? 'Working · in CI' : 'Agents working'],
-    [w.awaiting, `${stats.awaiting}`, 'Waiting on you', stats.awaiting > 0],
-    [w.cost, money(stats.costUsd), `Spend · ${compact(stats.tokens)} tok`],
-    [w.cycle, duration(stats.avgCycleMs), 'Avg cycle time'],
-    [w.loops, `${Math.round(stats.loopRate * 100)}%`, 'Needed rework'],
+    [w.throughput, `${done.length}`, 'Shipped'],
+    [w.inFlight, `${inFlight}${inCi ? ` +${inCi}` : ''}`, inCi ? 'Working · in CI' : 'Agents working'],
+    [w.awaiting, `${needsYou.length}`, 'Waiting on you', needsYou.length > 0],
+    [w.cost, money(cost), `Spend · ${compact(tokens)} tok`],
+    [w.cycle, duration(cycles.length ? cycles.reduce((a, b) => a + b, 0) / cycles.length : 0), 'Avg cycle time'],
+    [w.loops, `${reviewed.length ? Math.round((reviewed.filter((t) => t.iterations > 0).length / reviewed.length) * 100) : 0}%`, 'Needed rework'],
     [!!(w.harvest && hv.status?.configured), fmtHours(hv.status?.todayHours ?? 0), 'Harvest today'],
   ];
   const shown = items.filter((i) => i[0]);
@@ -95,4 +104,32 @@ export function Widgets() {
       ))}
     </div>
   );
+}
+
+/** Top-bar project switcher. */
+export function ProjectSwitcher() {
+  const { projects, allTickets } = useFactory();
+  const { prefs, set } = usePrefs();
+  if (projects.length < 2) return null;
+  const color = projects.find((p) => p.id === prefs.activeProject)?.color;
+  return (
+    <label className="pswitch" title="Switch project">
+      <span className="dot" style={{ background: color ?? 'var(--faint)' }} />
+      <select value={prefs.activeProject} onChange={(e) => set({ activeProject: e.target.value })}>
+        <option value="all">All projects ({allTickets.length})</option>
+        {projects.map((p) => (
+          <option key={p.id} value={p.id}>{p.name} ({allTickets.filter((t) => t.projectId === p.id).length})</option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+/** Small project tag for cards when viewing all projects. */
+export function ProjectTag({ projectId }: { projectId: string }) {
+  const { projects, project } = useFactory();
+  if (project || projects.length < 2) return null;
+  const p = projects.find((x) => x.id === projectId);
+  if (!p) return null;
+  return <span className="chip" style={{ borderColor: p.color, color: p.color }}>{p.name}</span>;
 }

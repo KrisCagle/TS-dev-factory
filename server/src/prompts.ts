@@ -52,6 +52,7 @@ export const REVIEW_SCHEMA = {
               title: { type: 'string' },
               steps: { type: 'array', items: { type: 'string' } },
               expect: { type: 'string', description: 'The one thing the PM should see.' },
+              screenshot: { type: 'string', description: 'Optional: file name of a screenshot in .factory/screenshots that shows this case.' },
             },
             required: ['title', 'steps', 'expect'],
           },

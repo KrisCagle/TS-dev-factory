@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from './api';
-import { Widgets } from './components/Bits';
+import { ProjectSwitcher, Widgets } from './components/Bits';
 import { CommandPalette, NewTicket } from './components/Modals';
 import { TicketDrawer } from './components/TicketDrawer';
 import { usePrefs, type View } from './prefs';
@@ -14,12 +14,16 @@ import { Office } from './views/office/Office';
 import { Inbox } from './views/Inbox';
 import { HarvestPill } from './components/HarvestPill';
 import { Settings } from './views/Settings';
+import { Reports } from './views/Reports';
+import { Rules } from './views/Rules';
 
 const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
   { v: 'inbox', icon: '✋', label: 'Needs you', key: 'i' },
   { v: 'office', icon: '🏢', label: 'Office', key: 'o' },
   { v: 'board', icon: '📋', label: 'Board', key: 'b' },
+  { v: 'reports', icon: '📊', label: 'Reports', key: 'r' },
   { v: 'agents', icon: '🤖', label: 'Agents', key: 'a' },
+  { v: 'rules', icon: '📐', label: 'House rules', key: 'h' },
   { v: 'activity', icon: '📜', label: 'Activity', key: 'l' },
   { v: 'settings', icon: '⚙️', label: 'Settings', key: 's' },
 ];
@@ -84,6 +88,24 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [view, go]);
 
+  // Notifications from the server: a toast while you're looking, a system notification when you're not.
+  const toastRef = useRef(ui.toast);
+  toastRef.current = ui.toast;
+  const browserOn = !!f.settings?.notifications.browser;
+  useEffect(() => f.onNotice((n) => {
+    if (document.visibilityState === 'visible') {
+      toastRef.current(`${/^\p{Extended_Pictographic}/u.test(n.title) ? "" : "🔔 "}${n.title}${n.body ? ` — ${n.body}` : ''}`);
+      return;
+    }
+    if (!browserOn || typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+    const note = new Notification(n.title, { body: n.body, tag: n.ticketId ?? n.event });
+    note.onclick = () => {
+      window.focus();
+      if (n.ticketId) setOpen(n.ticketId);
+      else go('inbox');
+    };
+  }), [f.onNotice, browserOn, go]);
+
   const awaiting = f.needsYou.length;
   const title = NAV.find((n) => n.v === view)?.label;
 
@@ -112,6 +134,7 @@ export function App() {
             <h1>{title}</h1>
             {view === 'board' && <input ref={search} className="input" style={{ maxWidth: 260 }} placeholder="Filter tickets…  /" value={filter} onChange={(e) => setFilter(e.target.value)} />}
             <span className="grow" />
+            <ProjectSwitcher />
             <HarvestPill />
             {awaiting > 0 && view !== 'inbox' && <button className="btn" onClick={() => go('inbox')}>✋ {awaiting} waiting on you</button>}
             <button className="btn" onClick={() => api.pause(!f.factory.paused)}>{f.factory.paused ? '▶ Resume' : '⏸ Pause'}</button>
@@ -127,6 +150,8 @@ export function App() {
                 {view === 'inbox' && <Inbox />}
                 {view === 'office' && <Office />}
                 {view === 'board' && <Board filter={filter} />}
+                {view === 'reports' && <Reports />}
+                {view === 'rules' && <Rules />}
                 {view === 'agents' && <Agents />}
                 {view === 'activity' && <Activity />}
                 {view === 'settings' && <Settings />}

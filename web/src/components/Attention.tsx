@@ -5,6 +5,7 @@ import { useFactory } from '../state';
 import { useUI } from '../ui';
 import { ago } from '../meta';
 import type { AttentionItem, CaseVerdict } from '../types';
+import { PreviewControls } from './FileViewer';
 
 const KIND_META: Record<AttentionItem['kind'], { icon: string; label: string; color: string }> = {
   review: { icon: '🧾', label: 'Review', color: 'var(--accent)' },
@@ -115,6 +116,10 @@ const urlIn = (s: string) => s.match(/https?:\/\/\S+/)?.[0];
 
 export function ReviewWalkthrough({ item, onClose }: { item: AttentionItem; onClose: () => void }) {
   const ui = useUI();
+  const { allTickets } = useFactory();
+  const ticket = allTickets.find((x) => x.id === item.ticketId);
+  const shotsFor = (i: number) => (ticket?.artifacts ?? []).filter((a) => a.caseIndex === i);
+  const looseShots = (ticket?.artifacts ?? []).filter((a) => a.caseIndex === undefined);
   const review = item.review!;
   const cases = review.cases;
   const storeKey = `walk:${item.id}`;
@@ -221,6 +226,12 @@ export function ReviewWalkthrough({ item, onClose }: { item: AttentionItem; onCl
                   );
                 })}
               </ol>
+              {ticket && (ticket.worktree || ticket.preview) && (
+                <div className="hpanel"><span className="small muted">Or skip the setup: run this branch on its own port and click through it.</span><PreviewControls t={ticket} compact /></div>
+              )}
+              {looseShots.length > 0 && (
+                <div className="shots">{looseShots.map((a) => <a key={a.id} href={api.artifactUrl(ticket!.id, a.id)} target="_blank" rel="noreferrer"><img src={api.artifactUrl(ticket!.id, a.id)} alt={a.caption ?? a.name} /><span className="small muted">{a.caption ?? a.name}</span></a>)}</div>
+              )}
               <button className="btn primary" onClick={() => go(0)}>Start case 1 →</button>
             </>
           )}
@@ -231,6 +242,15 @@ export function ReviewWalkthrough({ item, onClose }: { item: AttentionItem; onCl
               <h3>{c.title}</h3>
               <ol>{c.steps.map((s, i) => <li key={i}>{s}</li>)}</ol>
               <div className="expect"><span>You should see</span>{c.expect}</div>
+              {ticket && shotsFor(d.idx).length > 0 && (
+                <div className="shots big">
+                  {shotsFor(d.idx).map((a) => (
+                    <a key={a.id} href={api.artifactUrl(ticket.id, a.id)} target="_blank" rel="noreferrer" title="Open full size">
+                      <img src={api.artifactUrl(ticket.id, a.id)} alt={a.caption ?? a.name} />
+                    </a>
+                  ))}
+                </div>
+              )}
               <textarea
                 className="textarea"
                 style={{ minHeight: 60 }}

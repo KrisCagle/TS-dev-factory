@@ -2,8 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { DEFAULT_AGENTS, DEFAULT_SETTINGS } from './agents/defaults.js';
-import type { AgentConfig, AttentionItem, DB, LogEvent, Settings, Ticket } from './types.js';
+import { DEFAULT_AGENTS, DEFAULT_PROJECT_ID, DEFAULT_SETTINGS } from './agents/defaults.js';
+import type { AgentConfig, AttentionItem, DB, LogEvent, Project, Settings, Ticket } from './types.js';
 
 const MAX_LOGS = 20_000;
 const SECRET_FIELDS: Array<[keyof Settings['connectors'], string]> = [
@@ -18,6 +18,11 @@ export class Store extends EventEmitter {
   private db: DB;
   private saveTimer: NodeJS.Timeout | null = null;
 
+  /** Folder next to the db file for artifacts (screenshots) etc. */
+  get dataDir() {
+    return path.dirname(this.file);
+  }
+
   constructor(private file: string) {
     super();
     fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -29,9 +34,25 @@ export class Store extends EventEmitter {
     if (!fs.existsSync(this.file)) return fresh;
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<DB>;
+      const rs = (raw.settings ?? {}) as Partial<Settings>;
+      // Single-repo installs become a "default" project on first load.
+      const projects: Project[] = rs.projects?.length
+        ? rs.projects.map((p) => ({ ...fresh.settings.projects[0], ...p }))
+        : [{
+            ...fresh.settings.projects[0],
+            repoPath: rs.repoPath ?? '',
+            baseBranch: rs.baseBranch ?? 'main',
+            worktreesDir: rs.worktreesDir ?? '',
+            mergeStrategy: rs.mergeStrategy ?? 'local-merge',
+            githubRepo: rs.connectors?.github?.repo || undefined,
+            harvestProjectId: rs.harvest?.projectId,
+            harvestTaskId: rs.harvest?.taskId,
+          }];
+      const defaultProjectId = projects.some((p) => p.id === rs.defaultProjectId) ? rs.defaultProjectId! : projects[0].id;
       return {
         seq: raw.seq ?? 0,
-        tickets: raw.tickets ?? [],
+        seqs: raw.seqs ?? {},
+        tickets: (raw.tickets ?? []).map((t) => ({ ...t, projectId: t.projectId ?? defaultProjectId })),
         // merge so new default fields survive upgrades
         agents: DEFAULT_AGENTS.map((d) => ({ ...d, ...(raw.agents?.find((a) => a.role === d.role) ?? {}) })),
         settings: {
@@ -46,6 +67,11 @@ export class Store extends EventEmitter {
           ciGate: { ...fresh.settings.ciGate, ...(raw.settings?.ciGate ?? {}) },
           watchdog: { ...fresh.settings.watchdog, ...(raw.settings?.watchdog ?? {}) },
           harvest: { ...fresh.settings.harvest, ...(raw.settings?.harvest ?? {}) },
+          notifications: mergeNotifications(fresh.settings.notifications, rs.notifications),
+          reports: { ...fresh.settings.reports, ...(rs.reports ?? {}) },
+          scoper: { ...fresh.settings.scoper, ...(rs.scoper ?? {}) },
+          projects,
+          defaultProjectId,
         },
         logs: raw.logs ?? [],
         attention: raw.attention ?? [],
@@ -79,16 +105,34 @@ export class Store extends EventEmitter {
     return this.db.tickets.find((t) => t.id === id);
   }
 
+  // ---------- projects ----------
+  projects() {
+    return this.db.settings.projects;
+  }
+
+  /** A ticket's project (falls back to the default project). */
+  project(id?: string): Project {
+    const ps = this.db.settings.projects;
+    return ps.find((p) => p.id === id) ?? ps.find((p) => p.id === this.db.settings.defaultProjectId) ?? ps[0];
+  }
+
   nextKey(prefix = 'FAC') {
+    // numbered per prefix, so each project counts from 1 — and a deleted ticket's key (and branch) is never reused
+    const re = new RegExp(`^${prefix.replace(/[^A-Za-z0-9]/g, '')}-(\\d+)$`);
+    const max = this.db.tickets.reduce((m, t) => Math.max(m, Number(t.key.match(re)?.[1] ?? 0)), 0);
+    const seqs = (this.db.seqs ??= {});
+    seqs[prefix] = Math.max(seqs[prefix] ?? 0, max) + 1;
     this.db.seq += 1;
-    return `${prefix}-${this.db.seq}`;
+    return `${prefix}-${seqs[prefix]}`;
   }
 
   createTicket(input: Partial<Ticket> & { title: string }): Ticket {
     const now = Date.now();
+    const project = this.project(input.projectId);
     const t: Ticket = {
       id: randomUUID(),
-      key: input.key ?? this.nextKey(),
+      projectId: project.id,
+      key: input.key ?? this.nextKey(project.keyPrefix || 'FAC'),
       title: input.title,
       description: input.description ?? '',
       source: input.source ?? 'local',
@@ -243,6 +287,7 @@ export class Store extends EventEmitter {
       if (conn[f]) conn[f] = MASK;
     }
     if (s.harvest.token) s.harvest.token = MASK;
+    if (s.notifications.slack.webhookUrl) s.notifications.slack.webhookUrl = MASK;
     return s;
   }
 
@@ -260,8 +305,16 @@ export class Store extends EventEmitter {
       ciGate: { ...cur.ciGate, ...(patch.ciGate ?? {}) },
       watchdog: { ...cur.watchdog, ...(patch.watchdog ?? {}) },
       harvest: { ...cur.harvest, ...(patch.harvest ?? {}) },
+      notifications: mergeNotifications(cur.notifications, patch.notifications),
+      reports: { ...cur.reports, ...(patch.reports ?? {}) },
+      scoper: { ...cur.scoper, ...(patch.scoper ?? {}) },
+      projects: patch.projects?.length ? patch.projects : cur.projects,
     };
     if (next.harvest.token === MASK) next.harvest.token = cur.harvest.token;
+    if (next.notifications.slack.webhookUrl === MASK) next.notifications.slack.webhookUrl = cur.notifications.slack.webhookUrl;
+    if (!next.projects.some((p) => p.id === next.defaultProjectId)) next.defaultProjectId = next.projects[0].id;
+    // tickets of a deleted project move to the default one
+    for (const t of this.db.tickets) if (!next.projects.some((p) => p.id === t.projectId)) t.projectId = next.defaultProjectId;
     // a masked value coming back from the UI means "unchanged"
     for (const [c, f] of SECRET_FIELDS) {
       const n = next.connectors[c] as unknown as Record<string, string>;
@@ -274,3 +327,15 @@ export class Store extends EventEmitter {
     return next;
   }
 }
+
+function mergeNotifications(base: Settings['notifications'], patch?: Partial<Settings['notifications']>): Settings['notifications'] {
+  return {
+    ...base,
+    ...(patch ?? {}),
+    slack: { ...base.slack, ...(patch?.slack ?? {}) },
+    events: { ...base.events, ...(patch?.events ?? {}) },
+    quietHours: { ...base.quietHours, ...(patch?.quietHours ?? {}) },
+  };
+}
+
+export { DEFAULT_PROJECT_ID };

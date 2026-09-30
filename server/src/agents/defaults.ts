@@ -51,7 +51,10 @@ Role: QA Engineer.
 Verify the change works. Find the project's test runner and run the relevant tests.
 Add or update tests that cover the new behavior when the project has a test suite.
 Do not change production code — report failures instead so the engineer can fix them.
-Report passed=false if anything relevant fails.`,
+Report passed=false if anything relevant fails.
+If the change is visible in a UI and you can run it (for example with Playwright), save PNG screenshots of the
+changed screens into .factory/screenshots/ in the working directory, named after what they show
+(e.g. 01-settings-dark-mode.png). The PM sees them next to the review cases. Never commit that folder.`,
   },
   {
     role: 'reviewer',
@@ -74,8 +77,18 @@ Cover the happy path, the edge case most likely to break, and anything visible t
   },
 ];
 
+export const DEFAULT_PROJECT_ID = 'default';
+
 export const DEFAULT_SETTINGS: Settings = {
   mode: 'mock',
+  projects: [
+    {
+      id: DEFAULT_PROJECT_ID, name: 'My project', keyPrefix: 'FAC', color: '#6366f1',
+      repoPath: '', baseBranch: 'main', worktreesDir: '', mergeStrategy: 'local-merge',
+      previewCommand: 'npm run dev -- --port $PORT', previewPath: '/',
+    },
+  ],
+  defaultProjectId: DEFAULT_PROJECT_ID,
   repoPath: '',
   baseBranch: 'main',
   worktreesDir: '',
@@ -92,4 +105,14 @@ export const DEFAULT_SETTINGS: Settings = {
   ciGate: { enabled: true, pollSeconds: 30, mergeMethod: 'squash', maxWaitMinutes: 60 },
   watchdog: { enabled: true, stallMinutes: 10, maxNudges: 2 },
   harvest: { enabled: false, accountId: '', token: '', autoTimer: true },
+  notifications: {
+    enabled: true,
+    macos: true,
+    browser: true,
+    slack: { enabled: false, webhookUrl: '' },
+    events: { needsYou: true, ciFailed: true, shipped: true, failed: true, stuck: true },
+    quietHours: { enabled: false, from: '18:00', to: '08:00' },
+  },
+  reports: { dailySlack: false, dailyTime: '08:45' },
+  scoper: { model: 'sonnet' },
 };
