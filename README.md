@@ -96,11 +96,32 @@ web/src
   components/         ticket drawer, diff viewer, command palette
 ```
 
-## Ideas for next steps
+## Roadmap
+
+Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, and Harvest time tracking.
+
+**Next up** ⭐
+
+- **Multiple repos and projects**: a board, settings, Harvest project and office floor for each repo or client, with a switcher at the top.
+- **Live preview per ticket**: run the app from the ticket's branch copy on its own port, so the walkthrough's links open the running change.
+- **Ticket writer**: a Scoper agent that turns a rough idea, bug report or Slack thread into a ticket with acceptance criteria, and asks you only what's unclear.
+- **Notifications**: desktop and Slack pings when something needs you, CI keeps failing, or a ticket ships.
+
+**Later**
+
+- **Open in VS Code**: open the ticket's branch copy in VS Code to take over by hand, then hand it back to the agents.
+- **Screenshots and recordings in reviews**: the Tester attaches Playwright before/after captures to walkthrough cases.
+- **Repo house rules**: edit the repo's `CLAUDE.md` in the UI, and let review feedback suggest new rules.
+- **Daily standup and weekly report**: shipped, waiting on you, blocked, spend and Harvest hours, ready to share.
+- **Spend dashboard**: cost per ticket, agent and project over time, with a daily cap that pauses the factory.
+- **Dependencies and parallel planning**: "B waits on A", and never running two tickets that touch the same files at once.
+- **Office replay**: scrub back through a ticket's day in the office view.
+
+**Platform**
 
 - Swap the JSON store for SQLite/Postgres and add multi-user auth
-- Add webhooks from GitHub/Linear/Jira instead of manual import
-- Add more roles (Security reviewer, Docs writer) using the same `AgentConfig` shape
+- Webhooks from GitHub/Linear/Jira instead of manual import
+- More roles (Security reviewer, Docs writer) using the same `AgentConfig` shape
 - Run agents in containers for stronger isolation
 
 ## License
