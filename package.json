@@ -1,0 +1,33 @@
+{
+  "name": "ai-dev-factory",
+  "private": true,
+  "version": "0.1.0",
+  "description": "A software developer factory: Claude agents work tickets, you run the floor as PM.",
+  "license": "MIT",
+  "author": "Kris Cagle",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/KrisCagle/ai-dev-factory.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "server",
+    "web"
+  ],
+  "scripts": {
+    "setup": "env -u npm_config_allow_scripts npm install --registry=https://registry.npmjs.org/ && npm run build && npm start",
+    "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev -w server\" \"npm:dev -w web\"",
+    "build": "npm run build -w web && npm run build -w server",
+    "start": "npm run start -w server",
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.0"
+  },
+  "allowScripts": {
+    "esbuild": true,
+    "fsevents": true
+  }
+}
