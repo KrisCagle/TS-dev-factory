@@ -5,6 +5,8 @@ import { fileURLToPath } from 'node:url';
 import express, { type NextFunction, type Request, type Response } from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { CONNECTORS, connectorFor } from './connectors/index.js';
+import { harvest } from './connectors/harvest.js';
+import { HarvestService } from './harvest-service.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
@@ -16,7 +18,8 @@ const DATA = process.env.FACTORY_DATA ?? path.resolve(__dirname, '../../.factory
 const store = new Store(DATA);
 if (process.env.FACTORY_MODE === 'live' || process.env.FACTORY_MODE === 'mock') store.updateSettings({ mode: process.env.FACTORY_MODE });
 if (process.env.FACTORY_REPO) store.updateSettings({ repoPath: process.env.FACTORY_REPO });
-const orch = new Orchestrator(store);
+const harvestSvc = new HarvestService(store);
+const orch = new Orchestrator(store, harvestSvc);
 
 const app = express();
 app.use(express.json({ limit: '2mb' }));
@@ -39,7 +42,8 @@ function stats() {
     total: ts.length,
     done: ts.filter((t) => t.stage === 'done').length,
     inFlight: ts.filter((t) => ['planning', 'coding', 'testing', 'reviewing'].includes(t.stage)).length,
-    awaiting: ts.filter((t) => t.stage === 'awaiting_approval').length,
+    awaiting: store.attention().filter((a) => a.status === 'open').length,
+    ci: ts.filter((t) => t.stage === 'ci').length,
     failed: ts.filter((t) => t.stage === 'failed').length,
     costUsd: +ts.reduce((a, t) => a + t.costUsd, 0).toFixed(4),
     tokens: ts.reduce((a, t) => a + t.tokens, 0),
@@ -51,6 +55,7 @@ function stats() {
 // ---------------------------------------------------------------- state
 app.get('/api/state', wrap(() => ({
   tickets: store.tickets(),
+  attention: store.attention(),
   agents: store.agents(),
   settings: store.publicSettings(),
   factory: orch.status(),
@@ -79,8 +84,9 @@ const PM_MOVABLE: Stage[] = ['backlog', 'ready'];
 app.patch('/api/tickets/:id', wrap((req) => {
   const t = store.ticket(req.params.id);
   if (!t) throw Object.assign(new Error('not found'), { status: 404 });
-  const { title, description, priority, labels, stage, order } = req.body as Partial<Ticket>;
+  const { title, description, priority, labels, stage, order, harvest: hv } = req.body as Partial<Ticket>;
   const patch: Partial<Ticket> = {};
+  if (hv !== undefined) patch.harvest = { ...(t.harvest ?? { loggedHours: 0 }), projectId: hv.projectId, taskId: hv.taskId };
   if (title !== undefined) patch.title = title;
   if (description !== undefined) patch.description = description;
   if (priority !== undefined) patch.priority = priority;
@@ -115,11 +121,27 @@ app.post('/api/tickets/:id/notes', wrap((req) => {
   store.log({ ticketId: req.params.id, agent: 'pm', kind: 'pm', text: `Note: ${req.body?.text}` });
 }));
 
+// ---------------------------------------------------------------- the PM's inbox
+app.get('/api/attention', wrap(() => store.attention()));
+app.post('/api/attention/:id/resolve', wrap((req) => orch.resolve(req.params.id, req.body ?? {})));
+
+// ---------------------------------------------------------------- Harvest
+app.get('/api/harvest/status', wrap((req) => harvestSvc.status(req.query.force === '1')));
+app.get('/api/harvest/projects', wrap(() => harvest.projects(store.settings())));
+app.post('/api/harvest/test', wrap(async () => {
+  const me = await harvest.me(store.settings());
+  return { message: `Connected to Harvest as ${me.first_name} ${me.last_name}` };
+}));
+app.post('/api/tickets/:id/timer/start', wrap((req) => harvestSvc.startTimer(req.params.id, req.body?.reason)));
+app.post('/api/tickets/:id/timer/stop', wrap(async (req) => ({ hours: await harvestSvc.stopTimer(req.params.id) })));
+app.post('/api/tickets/:id/time', wrap((req) => harvestSvc.logTime(req.params.id, Number(req.body?.hours), req.body?.notes)));
+
 // ---------------------------------------------------------------- agents & settings
 app.patch('/api/agents/:role', wrap((req) => store.updateAgent(req.params.role as AgentRole, req.body)));
 app.post('/api/agents/:role/reset', wrap((req) => store.resetAgent(req.params.role as AgentRole)));
 app.patch('/api/settings', wrap((req) => {
   store.updateSettings(req.body);
+  harvestSvc.invalidate();
   return store.publicSettings();
 }));
 app.post('/api/factory/pause', wrap((req) => orch.setPaused(Boolean(req.body?.paused))));
@@ -192,6 +214,7 @@ store.on('log', (event) => broadcast({ type: 'log', event }));
 store.on('agents', (agents) => broadcast({ type: 'agents', agents }));
 store.on('settings', (settings) => broadcast({ type: 'settings', settings }));
 store.on('factory', (factory) => broadcast({ type: 'factory', factory }));
+store.on('attention', (attention) => { broadcast({ type: 'attention', attention }); pushStats(); });
 
 server.listen(PORT, () => {
   orch.start();

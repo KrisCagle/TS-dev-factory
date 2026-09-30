@@ -247,3 +247,50 @@ kbd { font-family: var(--mono); font-size: 10.5px; border: 1px solid var(--borde
 .char:active { cursor: grabbing; }
 .char-pop { position: absolute; z-index: 5; width: 260px; padding: 12px; display: grid; gap: 10px; }
 .zone-drag { cursor: move; }
+
+/* ---------- needs-you inbox ---------- */
+.inbox { padding: 16px 18px 28px; max-width: 980px; }
+.alist { display: grid; gap: 12px; }
+.alist.compact { gap: 4px; }
+.sect { font-size: 13px; margin: 0 0 8px; }
+.acard {
+  background: var(--panel); border: 1px solid var(--border); border-left: 4px solid var(--kind, var(--accent));
+  border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 10px; box-shadow: var(--shadow);
+}
+.acard.held { opacity: 0.75; border-left-style: dashed; }
+.acard h3 { margin: 0; font-size: 15px; letter-spacing: -0.01em; }
+.acard .abody { margin: 0; white-space: pre-wrap; color: var(--muted); font-size: 13px; }
+.brief { display: grid; grid-template-columns: 96px 1fr; gap: 4px 12px; margin: 0; font-size: 13px; padding: 10px 12px; background: var(--bg2); border-radius: 8px; }
+.brief dt { color: var(--muted); font-size: 12px; font-weight: 600; padding-top: 1px; }
+.brief dd { margin: 0; }
+.hrow { display: grid; grid-template-columns: 80px 1fr auto auto; gap: 10px; align-items: center; padding: 7px 10px; border-radius: 8px; cursor: pointer; font-size: 13px; background: var(--panel); border: 1px solid var(--border); }
+.hrow:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.linkish { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; }
+.drawer-items { padding: 12px 20px 0; display: grid; gap: 10px; }
+.drawer-items .acard { box-shadow: none; }
+
+/* ---------- review walkthrough ---------- */
+.walk { background: var(--panel); border: 1px solid var(--accent); border-radius: var(--radius); padding: 14px 16px; display: grid; gap: 12px; box-shadow: var(--shadow); }
+.dots { display: flex; gap: 6px; flex-wrap: wrap; }
+.dot-b { width: 28px; height: 28px; border-radius: 50%; border: 1.5px solid var(--border); background: var(--panel2); cursor: pointer; font-size: 12px; font-weight: 600; color: var(--muted); }
+.dot-b.on { border-color: var(--accent); color: var(--text); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent); }
+.dot-b.approved { background: var(--ok); border-color: var(--ok); color: white; }
+.dot-b.feedback { background: var(--warn); border-color: var(--warn); color: white; }
+.walk-body { display: grid; grid-template-columns: 1fr 220px; gap: 16px; }
+.walk-main { display: grid; gap: 10px; align-content: start; }
+.walk-main h3 { margin: 0; font-size: 16px; }
+.walk-main ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.walk-main ol.setup li { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.expect { border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); border-radius: 8px; padding: 10px 12px; }
+.expect span { display: block; font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--ok); margin-bottom: 3px; }
+.walk-notes { display: grid; gap: 6px; align-content: start; }
+@media (max-width: 760px) { .walk-body { grid-template-columns: 1fr; } }
+
+/* ---------- CI + Harvest ---------- */
+.chip.ci-success { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.chip.ci-failure { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+.chip.ci-pending { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 40%, var(--border)); }
+a.chip { text-decoration: none; }
+.hpanel { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--panel2); }
+.hpill { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 4px 3px 10px; font-size: 12.5px; background: var(--panel2); }
+.hpill .rec { width: 8px; height: 8px; border-radius: 50%; background: #ef4444; animation: pulse 1.4s ease-in-out infinite; }

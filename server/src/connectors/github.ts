@@ -1,4 +1,4 @@
-import type { Priority, Settings } from '../types.js';
+import type { CiCheck, CheckState, Priority, Settings } from '../types.js';
 import { http, type Connector } from './types.js';
 
 const api = (s: Settings, p: string) => `https://api.github.com/repos/${s.connectors.github.repo}${p}`;
@@ -14,7 +14,35 @@ function priorityFromLabels(labels: string[]): Priority {
 
 interface GhIssue { number: number; title: string; body: string | null; html_url: string; labels: Array<{ name: string }>; pull_request?: unknown }
 
-export const github: Connector & { createPR(s: Settings, head: string, base: string, title: string, body: string): Promise<string> } = {
+interface GhPull { number: number; html_url: string; state: string; merged: boolean; head: { sha: string } }
+interface GhCheckRuns { check_runs: Array<{ name: string; status: string; conclusion: string | null; html_url: string }> }
+interface GhCombined { state: string; statuses: Array<{ context: string; state: string; target_url: string | null }> }
+
+function runState(status: string, conclusion: string | null): CheckState {
+  if (status !== 'completed') return 'pending';
+  return conclusion && ['success', 'neutral', 'skipped'].includes(conclusion) ? 'success' : 'failure';
+}
+
+function statusState(state: string): CheckState {
+  return state === 'success' ? 'success' : state === 'pending' ? 'pending' : 'failure';
+}
+
+/** Roll individual checks up: any failure fails, any pending waits, none at all is "none". */
+export function rollUp(checks: CiCheck[]): CheckState {
+  if (!checks.length) return 'none';
+  if (checks.some((c) => c.state === 'failure')) return 'failure';
+  if (checks.some((c) => c.state === 'pending')) return 'pending';
+  return 'success';
+}
+
+export interface GithubExtras {
+  createPR(s: Settings, head: string, base: string, title: string, body: string): Promise<{ url: string; number: number }>;
+  findPR(s: Settings, head: string): Promise<{ url: string; number: number } | undefined>;
+  prChecks(s: Settings, prNumber: number): Promise<{ sha: string; state: CheckState; checks: CiCheck[]; merged: boolean; closed: boolean }>;
+  mergePR(s: Settings, prNumber: number, method: 'squash' | 'merge' | 'rebase', title: string): Promise<void>;
+}
+
+export const github: Connector & GithubExtras = {
   source: 'github',
   label: 'GitHub Issues',
   isEnabled: (s) => s.connectors.github.enabled && !!s.connectors.github.repo,
@@ -37,8 +65,32 @@ export const github: Connector & { createPR(s: Settings, head: string, base: str
   },
 
   async createPR(s, head, base, title, body) {
-    const pr = await http<{ html_url: string }>(api(s, '/pulls'), { method: 'POST', headers: headers(s), json: { title, head, base, body } });
-    return pr.html_url;
+    const pr = await http<GhPull>(api(s, '/pulls'), { method: 'POST', headers: headers(s), json: { title, head, base, body } });
+    return { url: pr.html_url, number: pr.number };
+  },
+
+  async findPR(s, head) {
+    const owner = s.connectors.github.repo.split('/')[0];
+    const prs = await http<GhPull[]>(api(s, `/pulls?state=open&head=${encodeURIComponent(`${owner}:${head}`)}`), { headers: headers(s) });
+    return prs[0] ? { url: prs[0].html_url, number: prs[0].number } : undefined;
+  },
+
+  async prChecks(s, prNumber) {
+    const pr = await http<GhPull>(api(s, `/pulls/${prNumber}`), { headers: headers(s) });
+    const sha = pr.head.sha;
+    const [runs, combined] = await Promise.all([
+      http<GhCheckRuns>(api(s, `/commits/${sha}/check-runs?per_page=100`), { headers: headers(s) }),
+      http<GhCombined>(api(s, `/commits/${sha}/status`), { headers: headers(s) }),
+    ]);
+    const checks: CiCheck[] = [
+      ...runs.check_runs.map((r) => ({ name: r.name, state: runState(r.status, r.conclusion), url: r.html_url })),
+      ...combined.statuses.map((st) => ({ name: st.context, state: statusState(st.state), url: st.target_url ?? undefined })),
+    ];
+    return { sha, state: rollUp(checks), checks, merged: pr.merged, closed: pr.state === 'closed' };
+  },
+
+  async mergePR(s, prNumber, method, title) {
+    await http(api(s, `/pulls/${prNumber}/merge`), { method: 'PUT', headers: headers(s), json: { merge_method: method, commit_title: title } });
   },
 
   async test(s) {

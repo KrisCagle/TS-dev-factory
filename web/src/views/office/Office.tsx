@@ -24,7 +24,7 @@ function palette(dark: boolean) {
 }
 
 export function Office() {
-  const { tickets, agents, settings, factory, logs, onLog, stats } = useFactory();
+  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou } = useFactory();
   const { prefs, setOffice } = usePrefs();
   const ui = useUI();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -144,7 +144,9 @@ export function Office() {
   const ready = tickets.filter((x) => x.stage === 'ready').sort((a, b) => PRIORITY_META[a.priority].rank - PRIORITY_META[b.priority].rank);
   const backlogN = tickets.filter((x) => x.stage === 'backlog').length;
   const failed = tickets.filter((x) => x.stage === 'failed');
-  const awaiting = tickets.filter((x) => x.stage === 'awaiting_approval');
+  const needIds = new Set(needsYou.map((a) => a.ticketId));
+  const awaiting = tickets.filter((x) => needIds.has(x.id));
+  const inCi = tickets.filter((x) => x.stage === 'ci');
   const shipped = tickets.filter((x) => x.stage === 'done').length;
   const seatedTicket = (role: AgentRole, slot: number): Ticket | undefined => {
     const c = sim.chars.find((x) => x.role === role && x.slot === slot);
@@ -214,7 +216,7 @@ export function Office() {
               {z.id === 'pm' && <PmOffice z={z} C={C} awaiting={awaiting} open={ui.openTicket} accent={prefs.accent} />}
               {z.id === 'break' && <BreakRoom z={z} C={C} />}
               {z.id === 'huddle' && <Huddle z={z} C={C} />}
-              {z.id === 'servers' && <Servers z={z} C={C} t={t} busy={(stats?.inFlight ?? 0) > 0} />}
+              {z.id === 'servers' && <Servers z={z} C={C} t={t} busy={(stats?.inFlight ?? 0) > 0 || inCi.length > 0} ci={inCi.filter((x) => !sim.carried(x.id))} open={ui.openTicket} />}
               {z.id === 'ship' && <ShipDock z={z} C={C} t={t} shipped={shipped} launching={sim.launchUntil > sim.now} />}
             </g>
           ))}
@@ -587,15 +589,24 @@ function Huddle({ z, C }: { z: Zone; C: Pal }) {
   );
 }
 
-function Servers({ z, C, t, busy }: { z: Zone; C: Pal; t: number; busy: boolean }) {
+function Servers({ z, C, t, busy, ci, open }: { z: Zone; C: Pal; t: number; busy: boolean; ci: Ticket[]; open: (id: string) => void }) {
+  const red = ci.some((x) => x.ci?.state === 'failure');
+  const rack = points.ciRack(z);
   return (
     <g>
+      <rect x={rack.x - 70} y={rack.y - 16} width={140} height={34} rx={5} fill={C.desk} opacity={0.9} />
+      {ci.slice(0, 3).map((tk, i) => (
+        <g key={tk.id}>
+          <Paper x={rack.x - 44 + i * 44} y={rack.y + 1} label={tk.key} color={tk.ci?.state === 'failure' ? '#ef4444' : tk.ci?.state === 'success' ? '#10b981' : '#f59e0b'} C={C} onClick={() => open(tk.id)} />
+        </g>
+      ))}
+      {ci.length > 0 && <text x={cx(z)} y={z.y + z.h - 10} textAnchor="middle" fontSize={10} fill={red ? '#ef4444' : C.text}>🚦 {ci.length} waiting on CI</text>}
       {[0, 1, 2].map((r) => (
         <g key={r}>
           <rect x={z.x + 24 + r * 50} y={z.y + 44} width={36} height={130} rx={4} fill={C.monitor} filter="url(#soft)" />
           {Array.from({ length: 9 }, (_, i) => (
             <circle key={i} cx={z.x + 34 + r * 50 + (i % 2) * 14} cy={z.y + 56 + Math.floor(i / 2) * 26} r={2.4}
-              fill={busy && Math.sin(t * (5 + i) + r * 3) > 0.2 ? '#22c55e' : '#334155'} />
+              fill={busy && Math.sin(t * (5 + i) + r * 3) > 0.2 ? (red && i % 3 === 0 ? '#ef4444' : ci.length ? '#f59e0b' : '#22c55e') : '#334155'} />
           ))}
         </g>
       ))}

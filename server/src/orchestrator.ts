@@ -1,28 +1,57 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
-import { ClaudeRunner, type AgentRunner } from './agents/runner.js';
+import { ClaudeRunner, type AgentRunner, type RunResult } from './agents/runner.js';
 import { MockRunner, mockDiff } from './agents/mock.js';
+import * as A from './attention.js';
 import { connectorFor, github } from './connectors/index.js';
 import * as g from './git.js';
+import type { HarvestService } from './harvest-service.js';
 import { PLAN_SCHEMA, REVIEW_SCHEMA, TEST_SCHEMA, coderPrompt, plannerPrompt, reviewerPrompt, testerPrompt } from './prompts.js';
 import type { Store } from './store.js';
-import { PRIORITY_RANK, type AgentRole, type Plan, type Review, type Stage, type TestReport, type Ticket } from './types.js';
+import {
+  PRIORITY_RANK,
+  type AgentRole, type AttentionItem, type CaseVerdict, type CiCheck, type CheckState, type Plan, type Review, type Stage, type TestReport, type Ticket,
+} from './types.js';
 
 type Phase = 'plan' | 'code';
 const ACTIVE: Stage[] = ['planning', 'coding', 'testing', 'reviewing'];
 
 class Cancelled extends Error {}
 class Escalate extends Error {}
+class Stuck extends Error {
+  constructor(public role: AgentRole, public minutes: number, public nudges: number) {
+    super(`${role} stopped responding for ${minutes} min after ${nudges} nudge(s)`);
+  }
+}
+
+/** Live view of one agent run, for the watchdog. */
+interface Activity {
+  ticketId: string;
+  role: AgentRole;
+  attempt: AbortController;
+  last: number;
+  stalled: boolean;
+}
+
+export interface ResolveInput {
+  option?: string;
+  text?: string;
+  verdicts?: CaseVerdict[];
+  notes?: string;
+}
 
 export class Orchestrator {
   private running = new Map<string, AbortController>();
+  private activity = new Map<string, Activity>();
+  private ciPolled = new Map<string, number>();
+  private mockCiPolls = new Map<string, number>();
   private claude = new ClaudeRunner();
   private mock = new MockRunner();
-  private timer: NodeJS.Timeout | null = null;
+  private timers: NodeJS.Timeout[] = [];
   paused = false;
   private shuttingDown = false;
 
-  constructor(private store: Store) {
+  constructor(private store: Store, private harvest: HarvestService) {
     // Anything mid-flight when the server stopped goes back in the queue.
     for (const t of store.tickets()) {
       if (ACTIVE.includes(t.stage)) {
@@ -33,12 +62,15 @@ export class Orchestrator {
   }
 
   start() {
-    this.timer = setInterval(() => this.tick(), 1500);
+    this.timers.push(setInterval(() => this.tick(), 1500));
+    this.timers.push(setInterval(() => void this.ciTick(), 3000));
+    this.timers.push(setInterval(() => this.watchdogTick(), 5000));
+    this.reconcile();
   }
 
   stop() {
     this.shuttingDown = true;
-    if (this.timer) clearInterval(this.timer);
+    for (const t of this.timers) clearInterval(t);
     for (const ac of this.running.values()) ac.abort();
   }
 
@@ -78,6 +110,8 @@ export class Orchestrator {
     const t = this.store.ticket(id);
     if (!t || t.stage !== 'awaiting_approval') throw new Error('Ticket is not waiting for approval');
     if (note) this.addNote(id, note);
+    this.store.closeAttentionFor(id);
+    void this.harvest.stopIfRunning(id);
     this.log(id, 'pm', 'pm', `Approved ${t.gate === 'plan' ? 'the plan' : 'the change'}${note ? `: ${note}` : ''}`);
     if (t.gate === 'plan') void this.pipeline(id, 'code');
     else void this.finalize(id);
@@ -87,6 +121,8 @@ export class Orchestrator {
     const t = this.store.ticket(id);
     if (!t || t.stage !== 'awaiting_approval') throw new Error('Ticket is not waiting for approval');
     this.addNote(id, feedback);
+    this.store.closeAttentionFor(id);
+    void this.harvest.stopIfRunning(id);
     this.store.updateTicket(id, { iterations: 0 });
     this.log(id, 'pm', 'pm', `Sent back: ${feedback}`);
     void this.pipeline(id, t.gate === 'plan' ? 'plan' : 'code');
@@ -94,11 +130,13 @@ export class Orchestrator {
 
   cancel(id: string) {
     const ac = this.running.get(id);
+    this.store.closeAttentionFor(id);
     if (ac) ac.abort();
     else this.store.updateTicket(id, { stage: 'backlog', activeAgent: undefined, gate: undefined });
   }
 
   retry(id: string) {
+    this.store.closeAttentionFor(id);
     this.store.updateTicket(id, { stage: 'ready', error: undefined, gate: undefined });
   }
 
@@ -106,6 +144,83 @@ export class Orchestrator {
     const t = this.store.ticket(id);
     if (!t) return;
     this.store.updateTicket(id, { notes: [...t.notes, { id: randomUUID(), text, ts: Date.now() }] });
+  }
+
+  /** The PM answered something in the inbox. */
+  resolve(itemId: string, input: ResolveInput) {
+    const item = this.store.attentionItem(itemId);
+    if (!item) throw Object.assign(new Error('Item not found'), { status: 404 });
+    if (item.status === 'held') throw Object.assign(new Error(item.heldReason ?? 'This item is on hold'), { status: 409 });
+    if (item.status !== 'open') throw Object.assign(new Error('Already answered'), { status: 409 });
+    const t = item.ticketId ? this.store.ticket(item.ticketId) : undefined;
+    const option = input.option;
+    const opt = item.options?.find((o) => o.id === option);
+    if (opt?.needsText && !input.text?.trim()) throw Object.assign(new Error('Add a note for the agents first.'), { status: 400 });
+
+    const done = (patch: Partial<AttentionItem['resolution']> = {}) =>
+      this.store.updateAttention(item.id, { status: 'resolved', resolution: { option, text: input.text, verdicts: input.verdicts, notes: input.notes, at: Date.now(), ...patch } });
+
+    if (!t) {
+      done();
+      return;
+    }
+    const kind = item.key.split(':')[0];
+
+    switch (kind) {
+      case 'plan':
+        done();
+        if (option === 'approve') this.approve(t.id, input.text);
+        else this.reject(t.id, input.text!.trim());
+        return;
+
+      case 'merge': {
+        // A walkthrough answer: every case approved → ship; otherwise the feedback goes back.
+        if (input.verdicts) {
+          const { allApproved, feedback } = A.consolidate(item, input.verdicts, input.notes);
+          done({ option: allApproved ? 'ship' : 'sendback' });
+          if (allApproved) this.approve(t.id);
+          else this.reject(t.id, feedback || 'PM requested changes.');
+          return;
+        }
+        done();
+        if (option === 'ship') this.approve(t.id, input.text);
+        else this.reject(t.id, input.text!.trim());
+        return;
+      }
+
+      case 'escalate':
+        done();
+        if (option === 'ship') this.approve(t.id, input.text);
+        else if (option === 'backlog') this.park(t.id);
+        else this.reject(t.id, input.text!.trim());
+        return;
+
+      case 'error':
+      case 'stuck':
+        done();
+        if (input.text?.trim()) this.addNote(t.id, input.text.trim());
+        if (option === 'retry') this.retry(t.id);
+        else this.park(t.id);
+        return;
+
+      case 'ciwait':
+        done();
+        if (option === 'skip') {
+          this.log(t.id, 'pm', 'pm', 'Skipped the CI wait.');
+          this.ciSettled(t.id, 'none', t.ci?.checks ?? []);
+        }
+        return;
+
+      default:
+        done();
+    }
+  }
+
+  private park(id: string) {
+    this.store.closeAttentionFor(id);
+    void this.harvest.stopIfRunning(id);
+    this.store.updateTicket(id, { stage: 'backlog', gate: undefined, activeAgent: undefined, error: undefined });
+    this.log(id, 'pm', 'pm', 'Parked in backlog.');
   }
 
   // ------------------------------------------------------------------ pipeline
@@ -129,7 +244,8 @@ export class Orchestrator {
         t = set({ plan });
         this.log(id, 'planner', 'result', `Plan: ${plan.summary}`);
         if (s.gates.plan) {
-          set({ stage: 'awaiting_approval', gate: 'plan', activeAgent: undefined });
+          t = set({ stage: 'awaiting_approval', gate: 'plan', activeAgent: undefined });
+          this.store.postAttention(A.planGate(t));
           this.log(id, 'factory', 'status', 'Plan ready — waiting for PM approval.');
           return;
         }
@@ -172,9 +288,22 @@ export class Orchestrator {
         break;
       }
 
-      t = set({ diff: await this.diff(this.store.ticket(id)!, cwd) });
+      t = set({ diff: await this.diff(this.store.ticket(id)!, cwd), activeAgent: undefined });
+
+      // ---- CI gate: open/update the PR and hold sign-off until checks are green
+      if (this.ciApplies()) {
+        await this.openOrUpdatePR(id);
+        t = set({ stage: 'ci', ci: { state: 'pending', checks: [], since: Date.now(), updatedAt: Date.now() } });
+        this.ciPolled.delete(id);
+        this.mockCiPolls.delete(id);
+        if (s.gates.merge) this.store.postAttention(A.signoff(t, 'Waiting for CI checks to pass'));
+        this.log(id, 'factory', 'status', `Waiting for CI on ${t.prNumber ? `PR #${t.prNumber}` : 'the branch'}…`);
+        return;
+      }
+
       if (s.gates.merge) {
-        set({ stage: 'awaiting_approval', gate: 'merge', activeAgent: undefined });
+        t = set({ stage: 'awaiting_approval', gate: 'merge' });
+        this.store.postAttention(A.signoff(t));
         this.log(id, 'factory', 'status', 'Ready for PM sign-off.');
         await this.sync(t, 'awaiting_approval', 'Implementation complete and reviewed — awaiting PM sign-off.');
       } else {
@@ -182,17 +311,24 @@ export class Orchestrator {
         await this.finalize(id);
       }
     } catch (err) {
-      if (this.shuttingDown) {
+      const t = this.store.ticket(id);
+      if (this.shuttingDown || !t) {
         // leave the stage alone — the constructor re-queues it on next start
       } else if (err instanceof Cancelled || ac.signal.aborted) {
         set({ stage: 'backlog', activeAgent: undefined });
         this.log(id, 'pm', 'pm', 'Cancelled by PM — moved back to backlog.');
       } else if (err instanceof Escalate) {
-        set({ stage: 'awaiting_approval', gate: 'merge', activeAgent: undefined });
+        const e = set({ stage: 'awaiting_approval', gate: 'merge', activeAgent: undefined });
+        this.store.postAttention(A.escalation(e, err.message));
         this.log(id, 'factory', 'status', `Escalated to PM: ${err.message}`);
+      } else if (err instanceof Stuck) {
+        const e = set({ stage: 'failed', activeAgent: undefined, error: err.message });
+        this.store.postAttention(A.stuck(e, this.store.agent(err.role).name, err.minutes, err.nudges));
+        this.log(id, 'factory', 'error', `⏰ Watchdog gave up: ${err.message}`);
       } else {
         const msg = err instanceof Error ? err.message : String(err);
-        set({ stage: 'failed', activeAgent: undefined, error: msg });
+        const e = set({ stage: 'failed', activeAgent: undefined, error: msg });
+        this.store.postAttention(A.failure(e, msg));
         this.log(id, 'factory', 'error', msg);
       }
     } finally {
@@ -219,27 +355,217 @@ export class Orchestrator {
     }
   }
 
-  private async runAgent(id: string, role: AgentRole, prompt: string, cwd: string, signal: AbortSignal, schema?: Record<string, unknown>) {
-    if (signal.aborted) throw new Cancelled();
+  /**
+   * Run one agent with the watchdog attached. A run that goes quiet is aborted and
+   * restarted with a nudge; after `maxNudges` it's handed to the PM as stuck.
+   */
+  private async runAgent(id: string, role: AgentRole, prompt: string, cwd: string, signal: AbortSignal, schema?: Record<string, unknown>): Promise<RunResult> {
     const agent = this.store.agent(role);
     const s = this.store.settings();
-    const before = this.store.ticket(id)!;
+    const maxNudges = s.watchdog.enabled ? s.watchdog.maxNudges : 0;
     this.store.updateTicket(id, { activeAgent: role });
     this.log(id, role, 'status', `${agent.name} started`);
-    const remaining = s.budgetPerTicketUsd > 0 ? Math.max(0.05, s.budgetPerTicketUsd - before.costUsd) : undefined;
-    try {
-      const r = await this.runner.run({
-        agent, prompt, cwd, schema, signal, budgetUsd: s.mode === 'live' ? remaining : undefined,
-        onEvent: (kind, text) => this.log(id, role, kind, text),
-      });
-      const t = this.store.ticket(id)!;
-      this.store.updateTicket(id, { costUsd: +(t.costUsd + r.costUsd).toFixed(4), tokens: t.tokens + r.tokens });
-      this.log(id, role, 'status', `${agent.name} finished ($${r.costUsd.toFixed(3)})`);
-      return r;
-    } catch (err) {
+
+    for (let attempt = 0; ; attempt++) {
       if (signal.aborted) throw new Cancelled();
-      throw err;
+      const attemptAc = new AbortController();
+      const onAbort = () => attemptAc.abort();
+      signal.addEventListener('abort', onAbort, { once: true });
+      const act: Activity = { ticketId: id, role, attempt: attemptAc, last: Date.now(), stalled: false };
+      this.activity.set(id, act);
+      const before = this.store.ticket(id)!;
+      const remaining = s.budgetPerTicketUsd > 0 ? Math.max(0.05, s.budgetPerTicketUsd - before.costUsd) : undefined;
+      const nudge = attempt
+        ? `⏰ The factory's watchdog restarted you: your previous attempt went quiet for too long (likely a hung command or a wait on something that never came). Don't repeat whatever blocked; finish the task${schema ? ' and return the structured result' : ''}.\n\n`
+        : '';
+      try {
+        const r = await this.runner.run({
+          agent, prompt: nudge + prompt, cwd, schema, signal: attemptAc.signal,
+          budgetUsd: s.mode === 'live' ? remaining : undefined,
+          onEvent: (kind, text) => {
+            act.last = Date.now();
+            this.log(id, role, kind, text);
+          },
+        });
+        const t = this.store.ticket(id)!;
+        this.store.updateTicket(id, { costUsd: +(t.costUsd + r.costUsd).toFixed(4), tokens: t.tokens + r.tokens });
+        // Finished without the result we asked for → one nudge to produce it.
+        if (schema && r.structured === undefined && attempt < maxNudges) {
+          this.log(id, 'factory', 'status', `⏰ Watchdog: ${agent.name} finished without a result — asking again.`);
+          continue;
+        }
+        this.log(id, role, 'status', `${agent.name} finished ($${r.costUsd.toFixed(3)})`);
+        return r;
+      } catch (err) {
+        if (signal.aborted) throw new Cancelled();
+        if (act.stalled) {
+          const minutes = Math.round(this.stallMs() / 60_000) || 1;
+          if (attempt < maxNudges) {
+            this.log(id, 'factory', 'status', `⏰ Watchdog: ${agent.name} went quiet — nudging (${attempt + 1}/${maxNudges}).`);
+            continue;
+          }
+          throw new Stuck(role, minutes, attempt);
+        }
+        throw err;
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+        if (this.activity.get(id) === act) this.activity.delete(id);
+      }
     }
+  }
+
+  // ------------------------------------------------------------------ watchdog + reconcile
+  private stallMs() {
+    const s = this.store.settings();
+    // Simulated agents emit every few seconds, so a short fuse keeps the demo lively.
+    return s.mode === 'mock' ? 20_000 : Math.max(1, s.watchdog.stallMinutes) * 60_000;
+  }
+
+  private watchdogTick() {
+    const s = this.store.settings();
+    if (s.watchdog.enabled) {
+      const limit = this.stallMs();
+      for (const act of this.activity.values()) {
+        if (!act.stalled && Date.now() - act.last > limit) {
+          act.stalled = true;
+          act.attempt.abort();
+        }
+      }
+    }
+    this.reconcile();
+  }
+
+  /** Make the board tell the truth: stages must match what's actually happening. */
+  private reconcile() {
+    for (const t of this.store.tickets()) {
+      if (ACTIVE.includes(t.stage) && !this.running.has(t.id)) {
+        this.store.updateTicket(t.id, { stage: 'ready', activeAgent: undefined });
+        this.log(t.id, 'factory', 'status', 'Watchdog: no agent was working this ticket — re-queued.');
+      }
+      if (t.stage === 'awaiting_approval' && !this.store.attention().some((a) => a.ticketId === t.id && (a.status === 'open' || a.status === 'held'))) {
+        this.store.postAttention(t.gate === 'plan' ? A.planGate(t) : A.signoff(t));
+      }
+      if (t.stage === 'failed' && t.error && !this.store.attention().some((a) => a.ticketId === t.id && (a.status === 'open' || a.status === 'held'))) {
+        this.store.postAttention(A.failure(t, t.error));
+      }
+    }
+  }
+
+  // ------------------------------------------------------------------ CI gate
+  private ciApplies() {
+    const s = this.store.settings();
+    if (!s.ciGate.enabled) return false;
+    if (s.mode === 'mock') return true; // simulated CI so the flow can be tried end to end
+    return s.mergeStrategy === 'pull-request' && github.isEnabled(s);
+  }
+
+  private async openOrUpdatePR(id: string) {
+    const s = this.store.settings();
+    const t = this.store.ticket(id)!;
+    if (s.mode === 'mock') {
+      if (!t.prNumber) this.store.updateTicket(id, { prNumber: 100 + Math.floor(Math.random() * 900) });
+      return;
+    }
+    if (!t.branch || !t.worktree) throw new Error('No branch to open a pull request from.');
+    await g.commitAll(t.worktree, `${t.key}: final touches`);
+    await g.pushBranch(t.worktree, t.branch);
+    if (t.prNumber) {
+      this.log(id, 'factory', 'status', `Pushed updates to PR #${t.prNumber}`);
+      return;
+    }
+    const existing = await github.findPR(s, t.branch);
+    const closes = t.source === 'github' && t.externalId ? `\n\nCloses #${t.externalId}` : '';
+    const pr = existing ?? (await github.createPR(s, t.branch, s.baseBranch, `${t.key}: ${t.title}`,
+      `${t.plan?.summary ?? t.description}\n\n${t.review ? `**Review:** ${t.review.summary}` : ''}${closes}\n\n_Built by AI Dev Factory_`));
+    this.store.updateTicket(id, { prNumber: pr.number, prUrl: pr.url });
+    this.log(id, 'factory', 'status', `Opened pull request #${pr.number} ${pr.url}`);
+  }
+
+  private async ciTick() {
+    const s = this.store.settings();
+    const interval = s.mode === 'mock' ? 4000 : Math.max(10, s.ciGate.pollSeconds) * 1000;
+    for (const t of this.store.tickets().filter((x) => x.stage === 'ci')) {
+      if (Date.now() - (this.ciPolled.get(t.id) ?? 0) < interval) continue;
+      this.ciPolled.set(t.id, Date.now());
+      try {
+        const r = s.mode === 'mock' ? this.mockChecks(t) : await github.prChecks(s, t.prNumber!);
+        if ('merged' in r && r.merged) {
+          this.log(t.id, 'factory', 'status', `PR #${t.prNumber} was merged outside the factory.`);
+          await this.markDone(t.id, t.prUrl);
+          continue;
+        }
+        if ('closed' in r && r.closed) {
+          const e = this.store.updateTicket(t.id, { stage: 'failed', error: `PR #${t.prNumber} was closed.` })!;
+          this.store.postAttention(A.failure(e, e.error!));
+          continue;
+        }
+        const since = t.ci?.sha && r.sha && t.ci.sha !== r.sha ? Date.now() : t.ci?.since ?? Date.now();
+        let state = r.state;
+        // Checks can take a minute to register on a fresh push — "none" only counts after that.
+        if (state === 'none' && Date.now() - since < 60_000) state = 'pending';
+        this.store.updateTicket(t.id, { ci: { state, checks: r.checks, sha: r.sha, since, updatedAt: Date.now() } });
+        if (state === 'pending') {
+          const waited = (Date.now() - since) / 60_000;
+          if (waited > s.ciGate.maxWaitMinutes && !this.store.openAttention(A.keys.ciWait(t))) {
+            this.store.postAttention(A.ciTooSlow(this.store.ticket(t.id)!, Math.round(waited)));
+          }
+          continue;
+        }
+        this.ciSettled(t.id, state, r.checks);
+      } catch (err) {
+        this.log(t.id, 'factory', 'error', `CI check failed: ${(err as Error).message}`);
+      }
+    }
+  }
+
+  private mockChecks(t: Ticket): { sha: string; state: CheckState; checks: CiCheck[] } {
+    const n = (this.mockCiPolls.get(t.id) ?? 0) + 1;
+    this.mockCiPolls.set(t.id, n);
+    const names = ['build', 'lint', 'unit tests'];
+    if (n < 3) return { sha: 'mock', state: 'pending', checks: names.map((name, i) => ({ name, state: i < n ? 'success' : 'pending' })) };
+    // First run on a ticket fails a quarter of the time, so you can see red CI loop back.
+    const fail = t.iterations === 0 && ((t.key.charCodeAt(t.key.length - 1) + (t.prNumber ?? 0)) % 4 === 0);
+    const checks: CiCheck[] = names.map((name) => ({ name, state: fail && name === 'unit tests' ? 'failure' : 'success' }));
+    return { sha: 'mock', state: fail ? 'failure' : 'success', checks };
+  }
+
+  /** CI finished (or was skipped): release sign-off, or send red CI back to the Coder. */
+  private ciSettled(id: string, state: CheckState, checks: CiCheck[]) {
+    const s = this.store.settings();
+    const t = this.store.ticket(id)!;
+    this.store.closeAttentionFor(id, 'ciwait');
+    if (state === 'failure') {
+      const failed = checks.filter((c) => c.state === 'failure');
+      const iterations = t.iterations + 1;
+      this.store.updateTicket(id, {
+        iterations,
+        testReport: {
+          passed: false,
+          summary: `CI failed: ${failed.map((c) => c.name).join(', ') || 'checks'}`,
+          failures: failed.map((c) => `${c.name}${c.url ? ` — ${c.url}` : ''}`),
+        },
+      });
+      this.store.closeAttentionFor(id, 'merge');
+      this.log(id, 'factory', 'status', `❌ CI failed (${failed.map((c) => c.name).join(', ')}) — back to the Coder, not to you.`);
+      if (iterations >= s.maxLoops) {
+        const e = this.store.updateTicket(id, { stage: 'awaiting_approval', gate: 'merge' })!;
+        this.store.postAttention(A.escalation(e, `CI kept failing after ${iterations} loops.`));
+        return;
+      }
+      this.store.updateTicket(id, { stage: 'ready' });
+      void this.pipeline(id, 'code');
+      return;
+    }
+
+    this.log(id, 'factory', 'status', state === 'success' ? '✅ CI is green.' : 'No CI checks — continuing.');
+    if (!s.gates.merge) {
+      void this.finalize(id);
+      return;
+    }
+    const e = this.store.updateTicket(id, { stage: 'awaiting_approval', gate: 'merge' })!;
+    // Re-posting supersedes the held item: same cases, now open, with the green CI in its brief.
+    this.store.postAttention(A.signoff(e));
+    void this.sync(e, 'awaiting_approval', 'Implementation complete, reviewed and CI green — awaiting PM sign-off.');
   }
 
   // ------------------------------------------------------------------ git / workspace
@@ -273,28 +599,43 @@ export class Orchestrator {
     const s = this.store.settings();
     const t = this.store.ticket(id)!;
     try {
-      let prUrl: string | undefined;
+      let prUrl = t.prUrl;
       if (s.mode === 'live' && t.branch && t.worktree) {
         await g.commitAll(t.worktree, `${t.key}: final touches`);
-        if (s.mergeStrategy === 'local-merge') {
+        if (t.prNumber && this.ciApplies()) {
+          // The CI gate already opened the PR — shipping means merging it.
+          await github.mergePR(s, t.prNumber, s.ciGate.mergeMethod, `${t.key}: ${t.title} (#${t.prNumber})`);
+          this.log(id, 'factory', 'status', `Merged PR #${t.prNumber} (${s.ciGate.mergeMethod})`);
+        } else if (s.mergeStrategy === 'local-merge') {
           await g.mergeBranch(s.repoPath, t.branch, `Merge ${t.key}: ${t.title}`);
           this.log(id, 'factory', 'status', `Merged ${t.branch} into ${s.baseBranch}`);
         } else if (s.mergeStrategy === 'pull-request') {
           await g.pushBranch(t.worktree, t.branch);
           const closes = t.source === 'github' && t.externalId ? `\n\nCloses #${t.externalId}` : '';
-          prUrl = await github.createPR(s, t.branch, s.baseBranch, `${t.key}: ${t.title}`, `${t.plan?.summary ?? t.description}\n\n${t.review ? `**Review:** ${t.review.summary}` : ''}${closes}\n\n_Built by AI Dev Factory_`);
+          const pr = await github.createPR(s, t.branch, s.baseBranch, `${t.key}: ${t.title}`, `${t.plan?.summary ?? t.description}\n\n${t.review ? `**Review:** ${t.review.summary}` : ''}${closes}\n\n_Built by AI Dev Factory_`);
+          prUrl = pr.url;
+          this.store.updateTicket(id, { prNumber: pr.number });
           this.log(id, 'factory', 'status', `Opened pull request ${prUrl}`);
         }
         if (s.mergeStrategy !== 'none' && fs.existsSync(t.worktree)) await g.removeWorktree(s.repoPath, t.worktree);
       }
-      const done = this.store.updateTicket(id, { stage: 'done', gate: undefined, activeAgent: undefined, finishedAt: Date.now(), prUrl, worktree: s.mergeStrategy === 'none' ? t.worktree : undefined })!;
-      this.log(id, 'factory', 'status', '🎉 Shipped.');
-      await this.sync(done, 'done', prUrl ? `Pull request opened: ${prUrl}` : 'Change approved by PM and shipped.');
+      await this.markDone(id, prUrl);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      this.store.updateTicket(id, { stage: 'failed', error: `Finalize failed: ${msg}` });
+      const e = this.store.updateTicket(id, { stage: 'failed', error: `Finalize failed: ${msg}` })!;
+      this.store.postAttention(A.failure(e, e.error!));
       this.log(id, 'factory', 'error', `Finalize failed: ${msg}`);
     }
+  }
+
+  private async markDone(id: string, prUrl?: string) {
+    const s = this.store.settings();
+    const t = this.store.ticket(id)!;
+    this.store.closeAttentionFor(id);
+    void this.harvest.stopIfRunning(id);
+    const done = this.store.updateTicket(id, { stage: 'done', gate: undefined, activeAgent: undefined, finishedAt: Date.now(), prUrl, worktree: s.mergeStrategy === 'none' ? t.worktree : undefined })!;
+    this.log(id, 'factory', 'status', '🎉 Shipped.');
+    await this.sync(done, 'done', prUrl ? `Shipped via ${prUrl}` : 'Change approved by PM and shipped.');
   }
 
   private async sync(t: Ticket, stage: Stage, message: string) {
@@ -328,5 +669,17 @@ function normalizeTest(x: unknown, text: string): TestReport {
 function normalizeReview(x: unknown, text: string): Review {
   const o = (x ?? {}) as Record<string, unknown>;
   const comments = Array.isArray(o.comments) ? (o.comments as Review['comments']) : [];
-  return { verdict: o.verdict === 'request_changes' ? 'request_changes' : 'approve', summary: String(o.summary ?? text.slice(0, 300)), comments };
+  const w = (o.walkthrough ?? undefined) as Record<string, unknown> | undefined;
+  const cases = Array.isArray(w?.cases)
+    ? (w!.cases as Array<Record<string, unknown>>)
+        .map((c) => ({ title: String(c.title ?? ''), steps: arr(c.steps), expect: String(c.expect ?? '') }))
+        .filter((c) => c.title && c.expect)
+        .slice(0, 8)
+    : [];
+  return {
+    verdict: o.verdict === 'request_changes' ? 'request_changes' : 'approve',
+    summary: String(o.summary ?? text.slice(0, 300)),
+    comments,
+    walkthrough: cases.length ? { setup: arr(w?.setup), cases } : undefined,
+  };
 }

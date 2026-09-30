@@ -182,7 +182,14 @@ export class Sim {
       if (A && A.role === cur.agent) return;
       const B = this.assign(t.id, cur.agent);
       if (!B) return;
-      if (!A) {
+      if (!A && p.stage === 'ci') {
+        // Red CI: the Coder fetches the ticket back from the server room.
+        B.actions.push(
+          { type: 'walk', to: () => points.ciRack(z.servers) },
+          { type: 'say', text: '❌ CI red — on it', ms: 2200, tone: 'bad' },
+          { type: 'pick', carry },
+        );
+      } else if (!A) {
         const fromPm = p.stage === 'awaiting_approval';
         if (fromPm) this.say(pm, t.gate === 'plan' || p.stage === 'awaiting_approval' ? '👍 Go for it' : '↩ Try again', 2500, 'ok');
         B.actions.push(
@@ -215,6 +222,19 @@ export class Sim {
           { type: 'walk', to: () => deliverPt(z[bRole], bSlot) },
           { type: 'say', text: `${t.key} → ${this.name(bRole)}`, ms: 2000 },
           { type: 'wait', ms: 600 },
+          { type: 'drop' },
+        );
+      }
+      return;
+    }
+
+    if (cur.stage === 'ci') {
+      if (A) {
+        A.actions.push(
+          { type: 'pick', carry },
+          { type: 'walk', to: () => points.ciRack(z.servers) },
+          { type: 'say', text: `🚦 ${t.key} → CI`, ms: 2000 },
+          { type: 'wait', ms: 500 },
           { type: 'drop' },
         );
       }
@@ -278,7 +298,18 @@ export class Sim {
       if (e.kind === 'pm') this.say(this.pm(), e.text.slice(0, 44), 3500, 'ok');
       return;
     }
-    if (!e.agent || e.agent === 'factory') return;
+    if (e.agent === 'factory') {
+      if (e.text.startsWith('⏰')) {
+        const c = this.chars.find((x) => x.ticketId === e.ticketId && x.role !== 'pm');
+        if (c) {
+          this.say(c, '⏰ Nudged by the watchdog', 3500, 'bad');
+          c.sadUntil = this.now + 3000;
+        }
+      }
+      if (/CI is green/.test(e.text)) this.say(this.pm(), '🚦 CI green — ready for you', 3000, 'ok');
+      return;
+    }
+    if (!e.agent) return;
     const c = this.chars.find((x) => x.role === e.agent && x.ticketId === e.ticketId);
     if (!c) return;
     switch (e.kind) {

@@ -39,6 +39,26 @@ export const REVIEW_SCHEMA = {
         required: ['severity', 'comment'],
       },
     },
+    walkthrough: {
+      type: 'object',
+      description: 'Only when approving: how the PM verifies the change by hand.',
+      properties: {
+        setup: { type: 'array', items: { type: 'string' }, description: 'A URL or a few commands to reach the change.' },
+        cases: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              title: { type: 'string' },
+              steps: { type: 'array', items: { type: 'string' } },
+              expect: { type: 'string', description: 'The one thing the PM should see.' },
+            },
+            required: ['title', 'steps', 'expect'],
+          },
+        },
+      },
+      required: ['setup', 'cases'],
+    },
   },
   required: ['verdict', 'summary', 'comments'],
 };
@@ -97,5 +117,6 @@ ${t.testReport ? `\n## Test report\n${t.testReport.passed ? 'PASSED' : 'FAILED'}
 ${clipped || '(empty diff)'}
 \`\`\`
 
-Review this change. Return verdict, summary and comments in the structured output format.`;
+Review this change. Return verdict, summary and comments in the structured output format.
+If you approve, include the walkthrough (setup + 2–6 test cases) the PM will use to sign off.`;
 }

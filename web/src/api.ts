@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRole, LogEvent, Settings, Ticket, TicketSource } from './types';
+import type { AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -16,6 +16,7 @@ export interface Stats {
   done: number;
   inFlight: number;
   awaiting: number;
+  ci: number;
   failed: number;
   costUsd: number;
   tokens: number;
@@ -28,8 +29,26 @@ export interface FactoryStatus {
   paused: boolean;
 }
 
+export interface HarvestStatus {
+  configured: boolean;
+  todayHours: number;
+  entries: Array<{ id: number; hours: number; notes: string | null; project: string; task: string; running: boolean }>;
+  running?: { entryId: number; notes: string | null; hours: number; ticketId?: string };
+  error?: string;
+  checkedAt: number;
+}
+
+export interface HarvestProject {
+  id: number;
+  name: string;
+  code: string | null;
+  client: string | null;
+  tasks: Array<{ id: number; name: string }>;
+}
+
 export interface ServerState {
   tickets: Ticket[];
+  attention: AttentionItem[];
   agents: AgentConfig[];
   settings: Settings;
   factory: FactoryStatus;
@@ -57,4 +76,11 @@ export const api = {
   sync: (source: TicketSource) => req<{ fetched: number; created: number }>('POST', `/api/connectors/${source}/sync`),
   testConnector: (source: TicketSource) => req<{ message: string }>('POST', `/api/connectors/${source}/test`),
   demo: () => req('POST', '/api/demo'),
+  resolve: (id: string, body: { option?: string; text?: string; verdicts?: CaseVerdict[]; notes?: string }) => req('POST', `/api/attention/${id}/resolve`, body),
+  harvestStatus: (force = false) => req<HarvestStatus>('GET', `/api/harvest/status${force ? '?force=1' : ''}`),
+  harvestProjects: () => req<HarvestProject[]>('GET', '/api/harvest/projects'),
+  harvestTest: () => req<{ message: string }>('POST', '/api/harvest/test'),
+  timerStart: (id: string, reason?: string) => req('POST', `/api/tickets/${id}/timer/start`, { reason }),
+  timerStop: (id: string) => req<{ hours?: number }>('POST', `/api/tickets/${id}/timer/stop`),
+  logTime: (id: string, hours: number, notes?: string) => req('POST', `/api/tickets/${id}/time`, { hours, notes }),
 };

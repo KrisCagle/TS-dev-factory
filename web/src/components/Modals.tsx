@@ -71,6 +71,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
     const go = (v: View, label: string, icon: string, hint: string): Cmd => ({ id: `go-${v}`, label, icon, hint, run: () => ui.go(v) });
     const base: Cmd[] = [
       { id: 'new', label: 'New ticket', icon: '＋', hint: 'N', run: () => ui.newTicket() },
+      go('inbox', 'Go to Needs you', '✋', 'G I'),
       go('office', 'Go to Office', '🏢', 'G O'),
       go('board', 'Go to Board', '📋', 'G B'),
       go('agents', 'Go to Agents', '🤖', 'G A'),

@@ -7,12 +7,13 @@ export type Stage =
   | 'coding'
   | 'testing'
   | 'reviewing'
+  | 'ci'                 // PR open, waiting for required checks to go green
   | 'awaiting_approval'  // a PM gate: approve the plan, or approve the final change
   | 'done'
   | 'failed';
 
 export const STAGES: Stage[] = [
-  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'awaiting_approval', 'done', 'failed',
+  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed',
 ];
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
@@ -42,10 +43,45 @@ export interface ReviewComment {
   comment: string;
 }
 
+export interface ReviewCase {
+  title: string;
+  steps: string[];
+  expect: string;
+}
+
+/** What the PM checks before signing off: how to set up, then one case per screen. */
+export interface Walkthrough {
+  setup: string[];
+  cases: ReviewCase[];
+}
+
 export interface Review {
   verdict: 'approve' | 'request_changes';
   summary: string;
   comments: ReviewComment[];
+  walkthrough?: Walkthrough;
+}
+
+export type CheckState = 'pending' | 'success' | 'failure' | 'none';
+
+export interface CiCheck {
+  name: string;
+  state: CheckState;
+  url?: string;
+}
+
+export interface CiStatus {
+  state: CheckState;
+  checks: CiCheck[];
+  sha?: string;
+  since: number;        // when we started waiting on this commit
+  updatedAt: number;
+}
+
+export interface HarvestTimer {
+  entryId: number;
+  startedAt: number;
+  notes: string;
 }
 
 export interface PmNote {
@@ -79,6 +115,9 @@ export interface Ticket {
   tokens: number;
   error?: string;
   prUrl?: string;
+  prNumber?: number;
+  ci?: CiStatus;
+  harvest?: { projectId?: number; taskId?: number; timer?: HarvestTimer; loggedHours: number };
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -103,6 +142,15 @@ export interface ConnectorSettings {
   jira: { enabled: boolean; baseUrl: string; email: string; token: string; jql: string };
 }
 
+export interface HarvestSettings {
+  enabled: boolean;
+  accountId: string;
+  token: string;
+  projectId?: number;
+  taskId?: number;
+  autoTimer: boolean;      // start a timer when you open a ticket that needs you, stop when you decide
+}
+
 export interface Settings {
   mode: 'live' | 'mock';
   repoPath: string;
@@ -114,6 +162,50 @@ export interface Settings {
   mergeStrategy: 'local-merge' | 'pull-request' | 'none';
   budgetPerTicketUsd: number;
   connectors: ConnectorSettings;
+  ciGate: { enabled: boolean; pollSeconds: number; mergeMethod: 'squash' | 'merge' | 'rebase'; maxWaitMinutes: number };
+  watchdog: { enabled: boolean; stallMinutes: number; maxNudges: number };
+  harvest: HarvestSettings;
+}
+
+// ---------------------------------------------------------------- attention (the PM's inbox)
+
+export type AttentionKind = 'decision' | 'review' | 'error' | 'todo';
+
+/** Every decision comes with the reasoning the PM needs to make it quickly. */
+export interface DecisionBrief {
+  recommend: string;
+  clearsWhen: string;
+  whyNow: string;
+  ifItWaits: string;
+}
+
+export interface AttentionOption {
+  id: string;
+  label: string;
+  primary?: boolean;
+  needsText?: boolean;   // e.g. "send back" requires feedback
+}
+
+export interface CaseVerdict {
+  verdict: 'approved' | 'feedback';
+  feedback?: string;
+}
+
+export interface AttentionItem {
+  id: string;
+  kind: AttentionKind;
+  ticketId?: string;
+  key: string;              // dedupe/supersede key, e.g. "merge:<ticketId>"
+  title: string;
+  body?: string;
+  brief?: DecisionBrief;
+  options?: AttentionOption[];
+  review?: Walkthrough & { summary: string };
+  status: 'open' | 'held' | 'resolved' | 'dismissed';
+  heldReason?: string;
+  resolution?: { option?: string; text?: string; verdicts?: CaseVerdict[]; notes?: string; at: number };
+  createdAt: number;
+  updatedAt: number;
 }
 
 export type LogKind = 'status' | 'text' | 'tool' | 'result' | 'error' | 'pm';
@@ -133,4 +225,5 @@ export interface DB {
   agents: AgentConfig[];
   settings: Settings;
   logs: LogEvent[];
+  attention: AttentionItem[];
 }

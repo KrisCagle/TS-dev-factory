@@ -65,6 +65,7 @@ export const points = {
     return { x: cx(z) + Math.cos(a) * 46, y: z.y + 140 + Math.sin(a) * 46 };
   },
   prop: (z: Zone): Pt => ({ x: cx(z), y: z.y + z.h - 44 }),
+  ciRack: (z: Zone): Pt => ({ x: cx(z), y: z.y + 212 }),
 };
 
 /** Break-room hangout spots, with what people do there. */

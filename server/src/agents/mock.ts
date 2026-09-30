@@ -20,12 +20,20 @@ export class MockRunner implements AgentRunner {
     const key = prompt.match(/Ticket ([A-Z]+-\d+)/)?.[1] ?? 'X';
     const steps = 3 + Math.floor(Math.random() * 4);
     const tools = agent.allowedTools;
+    const nudged = prompt.startsWith('⏰');
+    // Now and then an agent "hangs" so you can watch the watchdog catch it.
+    const willHang = !nudged && Math.random() < 0.07;
     onEvent('text', rand([
       `Looking at ${key}. Let me get oriented in the codebase first.`,
       `Picking up ${key}.`,
       `On it — reading the ticket and the relevant code.`,
     ]));
+    if (nudged) onEvent('text', 'Picking back up where I left off.');
     for (let i = 0; i < steps; i++) {
+      if (willHang && i === 1) {
+        onEvent('text', 'Waiting on a long-running command…');
+        await sleep(10 * 60_000, signal); // until the watchdog aborts this attempt
+      }
       await sleep(1200 + Math.random() * 1800, signal);
       const tool = rand(tools);
       const arg = tool === 'Bash' ? rand(['npm test', 'npm run lint', 'git diff --stat', 'npm run build']) : tool === 'Grep' || tool === 'Glob' ? rand(['useAuth', '**/*.test.ts', 'TODO', 'export function']) : rand(FILES);
@@ -63,12 +71,41 @@ export class MockRunner implements AgentRunner {
         const requestChanges = first && Math.random() < 0.45;
         const structured = requestChanges
           ? { verdict: 'request_changes', summary: 'Solid approach, one real issue to fix.', comments: [{ file: rand(FILES), line: 42, severity: 'major', comment: 'Missing null check — this throws when the user is signed out.' }, { file: rand(FILES), severity: 'nit', comment: 'Consider a more descriptive name.' }] }
-          : { verdict: 'approve', summary: 'Looks good. Clean, tested and consistent with the codebase.', comments: [{ severity: 'nit', comment: 'Could extract a helper later.' }] };
+          : {
+              verdict: 'approve',
+              summary: 'Looks good. Clean, tested and consistent with the codebase.',
+              comments: [{ severity: 'nit', comment: 'Could extract a helper later.' }],
+              walkthrough: mockWalkthrough(prompt),
+            };
         onEvent('text', structured.summary);
         return { ...base, text: structured.summary, structured };
       }
     }
   }
+}
+
+function mockWalkthrough(prompt: string) {
+  const title = prompt.match(/# Ticket [A-Z]+-\d+: (.*)/)?.[1] ?? 'the change';
+  return {
+    setup: ['npm run dev', 'Open http://localhost:3000 and sign in as the demo user'],
+    cases: [
+      {
+        title: `Happy path: ${title}`,
+        steps: ['Go to the screen this ticket touches', 'Perform the main action described in the ticket'],
+        expect: 'The new behavior works and nothing else on the screen changed.',
+      },
+      {
+        title: 'Empty or missing input',
+        steps: ['Repeat the action with the field left empty', 'Submit'],
+        expect: 'A clear inline message appears — no crash, no blank screen.',
+      },
+      {
+        title: 'Signed-out user',
+        steps: ['Sign out', 'Open the same URL directly'],
+        expect: 'You are redirected to sign in, then land back on this screen.',
+      },
+    ],
+  };
 }
 
 export function mockDiff(key: string, title: string) {

@@ -11,9 +11,12 @@ import { Activity } from './views/Activity';
 import { Agents } from './views/Agents';
 import { Board } from './views/Board';
 import { Office } from './views/office/Office';
+import { Inbox } from './views/Inbox';
+import { HarvestPill } from './components/HarvestPill';
 import { Settings } from './views/Settings';
 
 const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
+  { v: 'inbox', icon: '✋', label: 'Needs you', key: 'i' },
   { v: 'office', icon: '🏢', label: 'Office', key: 'o' },
   { v: 'board', icon: '📋', label: 'Board', key: 'b' },
   { v: 'agents', icon: '🤖', label: 'Agents', key: 'a' },
@@ -37,6 +40,16 @@ export function App() {
   const go = useCallback((v: View) => {
     setView(v);
     history.replaceState(null, '', `#${v}`);
+  }, []);
+
+  // Back/forward and typed #hash URLs switch views too.
+  useEffect(() => {
+    const onHash = () => {
+      const v = location.hash.slice(1) as View;
+      if (NAV.some((n) => n.v === v)) setView(v);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
   }, []);
 
   const ui: UI = {
@@ -71,7 +84,7 @@ export function App() {
     return () => window.removeEventListener('keydown', onKey);
   }, [view, go]);
 
-  const awaiting = f.tickets.filter((t) => t.stage === 'awaiting_approval').length;
+  const awaiting = f.needsYou.length;
   const title = NAV.find((n) => n.v === view)?.label;
 
   return (
@@ -85,7 +98,7 @@ export function App() {
           {NAV.map((n) => (
             <button key={n.v} className={`nav-btn ${view === n.v ? 'active' : ''}`} onClick={() => go(n.v)}>
               <span>{n.icon}</span> {n.label}
-              {n.v === 'board' && awaiting > 0 ? <span className="count" title="Waiting on you">{awaiting}</span> : <kbd>g {n.key}</kbd>}
+              {n.v === 'inbox' && awaiting > 0 ? <span className="count" title="Waiting on you">{awaiting}</span> : <kbd>g {n.key}</kbd>}
             </button>
           ))}
           <div className="spacer" />
@@ -99,7 +112,8 @@ export function App() {
             <h1>{title}</h1>
             {view === 'board' && <input ref={search} className="input" style={{ maxWidth: 260 }} placeholder="Filter tickets…  /" value={filter} onChange={(e) => setFilter(e.target.value)} />}
             <span className="grow" />
-            {awaiting > 0 && <button className="btn" onClick={() => setOpen(f.tickets.find((t) => t.stage === 'awaiting_approval')!.id)}>✋ {awaiting} waiting on you</button>}
+            <HarvestPill />
+            {awaiting > 0 && view !== 'inbox' && <button className="btn" onClick={() => go('inbox')}>✋ {awaiting} waiting on you</button>}
             <button className="btn" onClick={() => api.pause(!f.factory.paused)}>{f.factory.paused ? '▶ Resume' : '⏸ Pause'}</button>
             <button className="btn primary" onClick={() => setCreating('ready')}>＋ New ticket</button>
           </header>
@@ -110,6 +124,7 @@ export function App() {
           <div className="content">
             {!f.ready ? <div className="empty">Connecting to the factory…</div> : (
               <>
+                {view === 'inbox' && <Inbox />}
                 {view === 'office' && <Office />}
                 {view === 'board' && <Board filter={filter} />}
                 {view === 'agents' && <Agents />}

@@ -12,13 +12,18 @@ A software factory where Claude agents work your tickets and you run the floor a
 - **Agents**: Planner, Coder, Tester and Reviewer, each a Claude Agent SDK session running in the ticket's own **git worktree** (branch `factory/<key>-<slug>`). Every role can be turned on or off. You can edit each role's prompt, model, tools and turn limit in the UI.
 - **You're the PM**: drag tickets from Backlog into Ready to hand them to the factory. You can approve plans (optional gate), sign off on the final diff, or send work back with feedback. You can also add notes that every agent treats as top priority, stop work in progress, and pause the whole factory.
 - **Rework loop**: failed tests or requested review changes go back to the Coder automatically. When the rework limit is hit, the ticket comes to you.
+- **Needs you inbox** ✋: everything the agents need from you is in one queue: sign-offs, plan approvals, escalations and errors. Each item comes with a brief: what we recommend, what settles it, why it's being asked now, and what happens if it waits. When a question is re-asked, the newer version replaces the old one, so you only ever see the latest.
+- **Guided review walkthrough**: the Reviewer writes setup steps plus 2–6 test cases for each change. You go through them one screen at a time, each with a "You should see…" box, and approve it or leave feedback. When every case is approved, it ships. Any feedback goes back to the Coder as one consolidated message. Your progress is saved as you go.
+- **CI-aware merge gate** 🚦: with pull requests, the factory opens the PR before your sign-off and holds the sign-off until the required checks are green. Red CI goes back to the Coder, not to you. When you approve, the PR is merged with squash, merge or rebase, whichever you pick.
+- **Watchdog** ⏰: an agent that goes quiet (for example, a hung command or a wait that never ends) is restarted with a nudge. You only hear about it if nudging doesn't work. The board is also reconciled continuously, so a ticket's stage always matches what's actually happening.
+- **Harvest time tracking** ⏱: tracks your PM time. When you open something that needs you, a timer starts on the ticket's Harvest project, and it stops when you decide. You can also log hours manually per ticket. Today's total and the running timer sit in the top bar.
 - **Ticket sources**: a built-in board plus **GitHub Issues, Linear and Jira**. Tickets are imported into Backlog, and progress is sent back to the tracker as comments and status changes.
 - **Shipping**: when you approve, the change is merged locally, pushed as a GitHub PR, or left on the branch. You choose which in Settings.
 - **The Office** 🏢: a live, top-down animated office. Each agent is a character. They pull tickets off the Ticket Wall and carry them desk to desk on each handoff. When review or tests send work back, they meet at the Huddle table. Finished work goes to your PM inbox, and approved work launches from the Ship Dock. Speech bubbles show which tool each agent is running as it happens.
   - Drag characters around. Idle ones stay where you drop them.
   - Click a character to rename it or change its outfit, skin, hair and accessory.
   - Use **Arrange rooms** to drag whole rooms into your own layout.
-- **Customizable UI**: theme, accent color, density, which board columns show, which fields cards show, header widgets, grouping, and the default view. Also includes a ⌘K command palette and keyboard shortcuts (`n` new ticket, `g o/b/a/l/s` to navigate, `/` to filter).
+- **Customizable UI**: theme, accent color, density, which board columns show, which fields cards show, header widgets, grouping, and the default view. Also includes a ⌘K command palette and keyboard shortcuts (`n` new ticket, `g i/o/b/a/l/s` to navigate, `/` to filter).
 
 ## Quick start
 
@@ -58,7 +63,11 @@ For development with hot reload: `npm run dev`, then open http://localhost:5173.
 
 Agents load your repo's `CLAUDE.md`, so put team conventions there.
 
-Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`.
+Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`.
+
+**Harvest:** create a personal access token at Harvest ID → Developers. In Settings → Harvest, paste the token and your account ID, click **Test & load projects**, and pick a default project and task. Individual tickets can bill to a different project from the ticket drawer.
+
+**CI gate in live mode:** set "When you approve" to *Push branch & open a GitHub PR* and connect GitHub, with a token that has `repo` scope so the factory can read checks and merge.
 
 ## Safety notes
 
@@ -72,11 +81,13 @@ Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY
 ```
 server/src
   index.ts            REST + WebSocket API, serves the built UI
-  orchestrator.ts     scheduler + pipeline (plan → code → test → review → gates → ship)
+  orchestrator.ts     scheduler + pipeline (plan → code → test → review → CI → gates → ship), watchdog, reconcile
+  attention.ts        the PM inbox: decision briefs, sign-off walkthroughs, escalations
+  harvest-service.ts  PM time tracking (timers + manual entries)
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools
-  connectors/         github.ts · linear.ts · jira.ts
+  connectors/         github.ts (issues, PRs, checks) · linear.ts · jira.ts · harvest.ts
   git.ts              worktrees, commits, diff, merge, push
   store.ts            JSON-file store
 web/src

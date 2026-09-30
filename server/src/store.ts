@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { DEFAULT_AGENTS, DEFAULT_SETTINGS } from './agents/defaults.js';
-import type { AgentConfig, DB, LogEvent, Settings, Ticket } from './types.js';
+import type { AgentConfig, AttentionItem, DB, LogEvent, Settings, Ticket } from './types.js';
 
 const MAX_LOGS = 20_000;
 const SECRET_FIELDS: Array<[keyof Settings['connectors'], string]> = [
@@ -25,7 +25,7 @@ export class Store extends EventEmitter {
   }
 
   private load(): DB {
-    const fresh: DB = { seq: 0, tickets: [], agents: structuredClone(DEFAULT_AGENTS), settings: structuredClone(DEFAULT_SETTINGS), logs: [] };
+    const fresh: DB = { seq: 0, tickets: [], agents: structuredClone(DEFAULT_AGENTS), settings: structuredClone(DEFAULT_SETTINGS), logs: [], attention: [] };
     if (!fs.existsSync(this.file)) return fresh;
     try {
       const raw = JSON.parse(fs.readFileSync(this.file, 'utf8')) as Partial<DB>;
@@ -43,8 +43,12 @@ export class Store extends EventEmitter {
             linear: { ...fresh.settings.connectors.linear, ...(raw.settings?.connectors?.linear ?? {}) },
             jira: { ...fresh.settings.connectors.jira, ...(raw.settings?.connectors?.jira ?? {}) },
           },
+          ciGate: { ...fresh.settings.ciGate, ...(raw.settings?.ciGate ?? {}) },
+          watchdog: { ...fresh.settings.watchdog, ...(raw.settings?.watchdog ?? {}) },
+          harvest: { ...fresh.settings.harvest, ...(raw.settings?.harvest ?? {}) },
         },
         logs: raw.logs ?? [],
+        attention: raw.attention ?? [],
       };
     } catch (err) {
       console.error('[store] could not read db, starting fresh:', err);
@@ -119,6 +123,8 @@ export class Store extends EventEmitter {
   deleteTicket(id: string) {
     this.db.tickets = this.db.tickets.filter((t) => t.id !== id);
     this.db.logs = this.db.logs.filter((l) => l.ticketId !== id);
+    for (const a of this.db.attention) if (a.ticketId === id && (a.status === 'open' || a.status === 'held')) a.status = 'dismissed';
+    this.emit('attention', this.db.attention);
     this.scheduleSave();
     this.emit('ticketDeleted', id);
   }
@@ -136,6 +142,70 @@ export class Store extends EventEmitter {
   logs(ticketId?: string, limit = 500) {
     const src = ticketId ? this.db.logs.filter((l) => l.ticketId === ticketId) : this.db.logs;
     return src.slice(-limit);
+  }
+
+  // ---------- attention (the PM's inbox) ----------
+  attention() {
+    return this.db.attention;
+  }
+
+  attentionItem(id: string) {
+    return this.db.attention.find((a) => a.id === id);
+  }
+
+  /** Open items for a key (e.g. "merge:<ticket>"). */
+  openAttention(key: string) {
+    return this.db.attention.find((a) => a.key === key && (a.status === 'open' || a.status === 'held'));
+  }
+
+  /**
+   * Post an item. Anything still open under the same key is superseded (dismissed),
+   * so the PM only ever sees the latest version of a question.
+   */
+  postAttention(input: Omit<AttentionItem, 'id' | 'createdAt' | 'updatedAt' | 'status'> & { status?: AttentionItem['status'] }): AttentionItem {
+    const now = Date.now();
+    for (const a of this.db.attention) {
+      if (a.key === input.key && (a.status === 'open' || a.status === 'held')) {
+        a.status = 'dismissed';
+        a.updatedAt = now;
+      }
+    }
+    const item: AttentionItem = { ...input, id: randomUUID(), status: input.status ?? 'open', createdAt: now, updatedAt: now };
+    this.db.attention.push(item);
+    // keep history bounded
+    const closed = this.db.attention.filter((a) => a.status === 'resolved' || a.status === 'dismissed');
+    if (closed.length > 500) {
+      const drop = new Set(closed.slice(0, closed.length - 500).map((a) => a.id));
+      this.db.attention = this.db.attention.filter((a) => !drop.has(a.id));
+    }
+    this.scheduleSave();
+    this.emit('attention', this.db.attention);
+    return item;
+  }
+
+  updateAttention(id: string, patch: Partial<AttentionItem>) {
+    const a = this.attentionItem(id);
+    if (!a) return undefined;
+    Object.assign(a, patch, { updatedAt: Date.now() });
+    this.scheduleSave();
+    this.emit('attention', this.db.attention);
+    return a;
+  }
+
+  /** Close every open item for a ticket (it moved on without the PM). */
+  closeAttentionFor(ticketId: string, keyPrefix?: string) {
+    let changed = false;
+    for (const a of this.db.attention) {
+      if (a.ticketId === ticketId && (a.status === 'open' || a.status === 'held') && (!keyPrefix || a.key.startsWith(keyPrefix))) {
+        a.status = 'dismissed';
+        a.updatedAt = Date.now();
+        changed = true;
+      }
+    }
+    if (changed) {
+      this.scheduleSave();
+      this.emit('attention', this.db.attention);
+    }
   }
 
   // ---------- agents ----------
@@ -172,6 +242,7 @@ export class Store extends EventEmitter {
       const conn = s.connectors[c] as unknown as Record<string, string>;
       if (conn[f]) conn[f] = MASK;
     }
+    if (s.harvest.token) s.harvest.token = MASK;
     return s;
   }
 
@@ -186,7 +257,11 @@ export class Store extends EventEmitter {
         linear: { ...cur.connectors.linear, ...(patch.connectors?.linear ?? {}) },
         jira: { ...cur.connectors.jira, ...(patch.connectors?.jira ?? {}) },
       },
+      ciGate: { ...cur.ciGate, ...(patch.ciGate ?? {}) },
+      watchdog: { ...cur.watchdog, ...(patch.watchdog ?? {}) },
+      harvest: { ...cur.harvest, ...(patch.harvest ?? {}) },
     };
+    if (next.harvest.token === MASK) next.harvest.token = cur.harvest.token;
     // a masked value coming back from the UI means "unchanged"
     for (const [c, f] of SECRET_FIELDS) {
       const n = next.connectors[c] as unknown as Record<string, string>;

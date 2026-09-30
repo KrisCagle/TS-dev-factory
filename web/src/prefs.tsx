@@ -19,9 +19,10 @@ export interface Prefs {
   density: 'comfortable' | 'compact';
   columns: Stage[];                                   // visible board columns, in order
   cardFields: { labels: boolean; cost: boolean; agent: boolean; source: boolean; age: boolean };
-  widgets: { throughput: boolean; inFlight: boolean; awaiting: boolean; cost: boolean; cycle: boolean; loops: boolean };
+  widgets: { throughput: boolean; inFlight: boolean; awaiting: boolean; cost: boolean; cycle: boolean; loops: boolean; harvest: boolean };
   groupBy: 'none' | 'priority' | 'source';
   defaultView: View;
+  knownColumns?: Stage[];
   office: {
     looks: Partial<Record<AgentRole | 'pm', CharacterLook>>;
     zones: Record<string, ZonePos>;                   // user-dragged zone positions
@@ -32,9 +33,9 @@ export interface Prefs {
   };
 }
 
-export type View = 'board' | 'office' | 'agents' | 'activity' | 'settings';
+export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'settings';
 
-export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'awaiting_approval', 'done', 'failed'];
+export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed'];
 
 const DEFAULTS: Prefs = {
   theme: 'system',
@@ -42,7 +43,7 @@ const DEFAULTS: Prefs = {
   density: 'comfortable',
   columns: ALL_COLUMNS,
   cardFields: { labels: true, cost: true, agent: true, source: true, age: false },
-  widgets: { throughput: true, inFlight: true, awaiting: true, cost: true, cycle: true, loops: false },
+  widgets: { throughput: true, inFlight: true, awaiting: true, cost: true, cycle: true, loops: false, harvest: true },
   groupBy: 'none',
   defaultView: 'office',
   office: { looks: {}, zones: {}, showBubbles: true, showFeed: true, speed: 1, pmName: 'You' },
@@ -60,6 +61,9 @@ function load(): Prefs {
       cardFields: { ...DEFAULTS.cardFields, ...raw.cardFields },
       widgets: { ...DEFAULTS.widgets, ...raw.widgets },
       office: { ...DEFAULTS.office, ...raw.office },
+      // add columns introduced after the prefs were saved, in their natural place
+      columns: ALL_COLUMNS.filter((c) => (raw.columns ?? ALL_COLUMNS).includes(c) || !(raw.knownColumns ?? ALL_COLUMNS.filter((x) => x !== 'ci')).includes(c)),
+      knownColumns: ALL_COLUMNS,
     };
   } catch {
     return DEFAULTS;

@@ -4,6 +4,8 @@ import { Toggle } from '../components/Bits';
 import { STAGE_META } from '../meta';
 import { ALL_COLUMNS, usePrefs, type Prefs, type View } from '../prefs';
 import { useFactory } from '../state';
+import { useHarvestProjects } from '../components/HarvestPanel';
+import { useHarvest } from '../harvest';
 import { useUI } from '../ui';
 import type { Settings as S, TicketSource } from '../types';
 
@@ -100,6 +102,41 @@ export function Settings() {
       </section>
 
       <section className="card">
+        <h2>🛡 Quality gates</h2>
+        <div className="desc">Checks between the agents and you, so you only see work that's ready.</div>
+        <div className="row"><Toggle on={s.ciGate.enabled} onChange={(v) => setS({ ...s, ciGate: { ...s.ciGate, enabled: v } })} /> <span><strong>CI gate</strong> — open the PR first, hold your sign-off until checks are green, and send red CI back to the Coder instead of to you</span></div>
+        {s.ciGate.enabled && (
+          <div className="grid2">
+            <label className="field">Poll CI every (seconds)
+              <input className="input" type="number" min={10} value={s.ciGate.pollSeconds} onChange={(e) => setS({ ...s, ciGate: { ...s.ciGate, pollSeconds: Number(e.target.value) } })} />
+            </label>
+            <label className="field">Ask me if CI runs longer than (minutes)
+              <input className="input" type="number" min={5} value={s.ciGate.maxWaitMinutes} onChange={(e) => setS({ ...s, ciGate: { ...s.ciGate, maxWaitMinutes: Number(e.target.value) } })} />
+            </label>
+            <label className="field">Merge the PR with
+              <select className="select" value={s.ciGate.mergeMethod} onChange={(e) => setS({ ...s, ciGate: { ...s.ciGate, mergeMethod: e.target.value as S['ciGate']['mergeMethod'] } })}>
+                <option value="squash">Squash</option><option value="merge">Merge commit</option><option value="rebase">Rebase</option>
+              </select>
+            </label>
+            <div className="small muted" style={{ alignSelf: 'end' }}>Live mode uses it when “When you approve” is <em>open a GitHub PR</em> and GitHub is connected. Simulated mode fakes CI so you can try it.</div>
+          </div>
+        )}
+        <div className="row"><Toggle on={s.watchdog.enabled} onChange={(v) => setS({ ...s, watchdog: { ...s.watchdog, enabled: v } })} /> <span><strong>Watchdog</strong> — restart an agent that goes quiet with a nudge, and only bring it to you if that doesn't work</span></div>
+        {s.watchdog.enabled && (
+          <div className="grid2">
+            <label className="field">Nudge after no activity for (minutes)
+              <input className="input" type="number" min={1} value={s.watchdog.stallMinutes} onChange={(e) => setS({ ...s, watchdog: { ...s.watchdog, stallMinutes: Number(e.target.value) } })} />
+            </label>
+            <label className="field">Nudges before asking you
+              <input className="input" type="number" min={0} max={5} value={s.watchdog.maxNudges} onChange={(e) => setS({ ...s, watchdog: { ...s.watchdog, maxNudges: Number(e.target.value) } })} />
+            </label>
+          </div>
+        )}
+      </section>
+
+      <HarvestSettings s={s} setS={setS} dirty={dirty} />
+
+      <section className="card">
         <h2>🔌 Ticket sources</h2>
         <div className="desc">Imported tickets land in Backlog. Progress is mirrored back as comments and status changes. Tokens can also come from GITHUB_TOKEN / LINEAR_API_KEY / JIRA_TOKEN env vars.</div>
 
@@ -191,5 +228,61 @@ function Conn({ title, on, onToggle, onTest, onSync, children }: { title: string
       </div>
       {on && <div className="grid2">{children}</div>}
     </div>
+  );
+}
+
+function HarvestSettings({ s, setS, dirty }: { s: S; setS: (s: S) => void; dirty: boolean }) {
+  const ui = useUI();
+  const hv = useHarvest();
+  const h = s.harvest;
+  const connected = !!hv.status?.configured && !hv.status.error;
+  const { projects, error, reload } = useHarvestProjects(h.enabled && connected);
+  const set = (patch: Partial<S['harvest']>) => setS({ ...s, harvest: { ...h, ...patch } });
+  const project = projects?.find((p) => p.id === h.projectId);
+
+  const test = async () => {
+    try {
+      if (dirty) await api.updateSettings(s);
+      ui.toast(`✓ ${(await api.harvestTest()).message}`);
+      await hv.refresh(true);
+      await reload();
+    } catch (e) {
+      ui.toast(`⚠ ${(e as Error).message}`);
+    }
+  };
+
+  return (
+    <section className="card">
+      <h2>⏱ Harvest time tracking</h2>
+      <div className="desc">Track your time as PM: reviews, decisions and sign-offs. Get a personal access token and your account id from Harvest ID → Developers.</div>
+      <div className="row"><Toggle on={h.enabled} onChange={(v) => set({ enabled: v })} /> <span>Use Harvest</span></div>
+      {h.enabled && (
+        <>
+          <div className="grid2">
+            <label className="field">Account ID<input className="input mono" value={h.accountId} onChange={(e) => set({ accountId: e.target.value })} /></label>
+            <label className="field">Personal access token<input className="input mono" type="password" value={h.token} onChange={(e) => set({ token: e.target.value })} /></label>
+          </div>
+          <div className="row"><button className="btn sm" onClick={test}>Test & load projects</button>{error && <span className="small" style={{ color: 'var(--bad)' }}>{error}</span>}</div>
+          <div className="grid2">
+            <label className="field">Default project
+              <select className="select" value={h.projectId ?? ''} onChange={(e) => {
+                const p = projects?.find((x) => x.id === Number(e.target.value));
+                set({ projectId: p?.id, taskId: p?.tasks[0]?.id });
+              }}>
+                <option value="">{projects ? 'Choose…' : 'Test the connection to load projects'}</option>
+                {projects?.map((p) => <option key={p.id} value={p.id}>{p.client ? `${p.client} — ` : ''}{p.name}</option>)}
+              </select>
+            </label>
+            <label className="field">Default task
+              <select className="select" value={h.taskId ?? ''} onChange={(e) => set({ taskId: Number(e.target.value) })}>
+                {(project?.tasks ?? []).map((t) => <option key={t.id} value={t.id}>{t.name}</option>)}
+              </select>
+            </label>
+          </div>
+          <div className="row"><Toggle on={h.autoTimer} onChange={(v) => set({ autoTimer: v })} /> <span>Start a timer automatically when I open something that needs me, and stop it when I decide</span></div>
+          <div className="small muted">Tickets can bill to a different project from their drawer. Tokens can also come from HARVEST_TOKEN / HARVEST_ACCOUNT_ID.</div>
+        </>
+      )}
+    </section>
   );
 }

@@ -1,27 +1,38 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useFactory } from '../state';
+import { useHarvest } from '../harvest';
 import { useUI } from '../ui';
 import { ACTIVE_STAGES, PRIORITY_META, SOURCE_META, STAGE_META, ago, compact, duration, money } from '../meta';
 import type { LogEvent, Priority, Ticket } from '../types';
 import { AgentPill } from './Bits';
+import { DecisionCard } from './Attention';
 import { Diff } from './Diff';
+import { HarvestPanel } from './HarvestPanel';
 
 type Tab = 'overview' | 'live' | 'diff' | 'quality';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void }) {
-  const { tickets, logs: allLogs, agents } = useFactory();
+  const { tickets, logs: allLogs, agents, attention } = useFactory();
+  const hv = useHarvest();
   const ui = useUI();
   const t = tickets.find((x) => x.id === id);
   const [tab, setTab] = useState<Tab>('overview');
   const [history, setHistory] = useState<LogEvent[]>([]);
-  const [feedback, setFeedback] = useState('');
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.ticketLogs(id).then(setHistory).catch(() => {});
   }, [id]);
+
+  const items = attention.filter((a) => a.ticketId === id && (a.status === 'open' || a.status === 'held'));
+  const needsYou = items.some((a) => a.status === 'open');
+  // Opening a ticket that needs you starts your Harvest review timer (if auto-timers are on).
+  useEffect(() => {
+    if (needsYou) hv.autoStart(id, 'PM review');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, needsYou]);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === 'Escape' && onClose();
@@ -80,24 +91,9 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
           </div>
         </div>
 
-        {t.stage === 'awaiting_approval' && (
-          <div className="gatebar" style={{ marginTop: 12 }}>
-            <div>
-              <strong>{t.gate === 'plan' ? '✋ Approve the plan?' : '✋ Ready for your sign-off'}</strong>
-              <div className="small muted">
-                {t.gate === 'plan'
-                  ? 'The Planner finished. Approve to start coding, or send it back with direction.'
-                  : t.review?.verdict === 'request_changes'
-                    ? 'Escalated: the team hit the rework limit. Decide whether to ship or redirect.'
-                    : 'Tested and reviewed. Approve to merge / open the PR, or send it back.'}
-              </div>
-            </div>
-            <textarea className="textarea" style={{ minHeight: 56 }} placeholder="Feedback or instructions for the agents (required to send back)…" value={feedback} onChange={(e) => setFeedback(e.target.value)} />
-            <div className="row">
-              <button className="btn ok" disabled={busy} onClick={() => act(() => api.approve(t.id, feedback || undefined), t.gate === 'plan' ? 'Plan approved — coding' : 'Approved — shipping')}>✓ Approve{t.gate === 'merge' ? ' & ship' : ''}</button>
-              <button className="btn" disabled={busy || !feedback.trim()} onClick={() => act(() => api.reject(t.id, feedback), 'Sent back to the team').then(() => setFeedback(''))}>↩ Send back</button>
-              {t.gate === 'merge' && <button className="btn ghost sm" onClick={() => setTab('diff')}>Review diff</button>}
-            </div>
+        {items.length > 0 && (
+          <div className="drawer-items">
+            {items.map((a) => <DecisionCard key={a.id} item={a} showTicket={false} />)}
           </div>
         )}
 
@@ -116,6 +112,18 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
                 <textarea className="textarea" style={{ minHeight: 120 }} defaultValue={t.description} key={t.id + 'd'} onBlur={(e) => e.target.value !== t.description && save({ description: e.target.value })} />
               </label>
               {t.error && <div className="banner" style={{ margin: 0 }}>⚠ {t.error}</div>}
+              {(t.ci || t.prNumber) && (
+                <div>
+                  <strong>🚦 CI {t.prNumber ? <>on {t.prUrl ? <a href={t.prUrl} target="_blank" rel="noreferrer">PR #{t.prNumber} ↗</a> : `PR #${t.prNumber}`}</> : ''}</strong>
+                  <div className="row wrap" style={{ marginTop: 6 }}>
+                    <span className={`chip ci-${t.ci?.state ?? 'none'}`}>{{ pending: '⏳ running', success: '✅ green', failure: '❌ red', none: '— no checks' }[t.ci?.state ?? 'none']}</span>
+                    {t.ci?.checks.map((c) => (
+                      <a key={c.name} className={`chip ci-${c.state}`} href={c.url} target="_blank" rel="noreferrer">{c.state === 'success' ? '✓' : c.state === 'failure' ? '✗' : '…'} {c.name}</a>
+                    ))}
+                  </div>
+                </div>
+              )}
+              <HarvestPanel t={t} />
               {t.plan && (
                 <div className="plan">
                   <strong>🧭 Plan</strong>

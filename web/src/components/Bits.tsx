@@ -4,6 +4,7 @@ import { compact, duration, money, PRIORITY_META, ROLE_META, SOURCE_META, ago } 
 import type { AgentRole, Ticket } from '../types';
 import { useUI } from '../ui';
 import { ACTIVE_STAGES } from '../meta';
+import { fmtHours, useHarvest } from '../harvest';
 
 export function Toggle({ on, onChange, title }: { on: boolean; onChange: (v: boolean) => void; title?: string }) {
   return <button type="button" title={title} className={`toggle ${on ? 'on' : ''}`} onClick={() => onChange(!on)} aria-pressed={on} />;
@@ -55,6 +56,8 @@ export function TicketCard({ t, draggable, onDragStart, onDragEnd, dragging }: {
       <div className="meta">
         {f.agent && t.activeAgent && live && <AgentPill role={t.activeAgent} live />}
         {t.stage === 'awaiting_approval' && <span className="badge" style={{ background: 'var(--accent)', color: 'white' }}>{t.gate === 'plan' ? 'Approve plan' : 'Sign off'}</span>}
+        {t.stage === 'ci' && <span className={`chip ci-${t.ci?.state ?? 'pending'}`}>🚦 {t.prNumber ? `#${t.prNumber} ` : ''}{t.ci?.checks.filter((c) => c.state === 'success').length ?? 0}/{t.ci?.checks.length || '…'} checks</span>}
+        {t.harvest?.timer && <span className="chip ci-pending" title="Harvest timer running">⏱</span>}
         {t.stage === 'failed' && <span className="badge" style={{ color: 'var(--bad)' }}>⚠ {t.error?.slice(0, 40)}</span>}
         {t.stage === 'done' && t.prUrl && <span className="chip">PR opened</span>}
         <span style={{ marginLeft: 'auto' }} />
@@ -68,15 +71,17 @@ export function TicketCard({ t, draggable, onDragStart, onDragEnd, dragging }: {
 export function Widgets() {
   const { stats } = useFactory();
   const { prefs } = usePrefs();
+  const hv = useHarvest();
   if (!stats) return null;
   const w = prefs.widgets;
   const items: Array<[boolean, string, string, boolean?]> = [
     [w.throughput, `${stats.done}`, 'Shipped'],
-    [w.inFlight, `${stats.inFlight}`, 'Agents working'],
+    [w.inFlight, `${stats.inFlight}${stats.ci ? ` +${stats.ci}` : ''}`, stats.ci ? 'Working · in CI' : 'Agents working'],
     [w.awaiting, `${stats.awaiting}`, 'Waiting on you', stats.awaiting > 0],
     [w.cost, money(stats.costUsd), `Spend · ${compact(stats.tokens)} tok`],
     [w.cycle, duration(stats.avgCycleMs), 'Avg cycle time'],
     [w.loops, `${Math.round(stats.loopRate * 100)}%`, 'Needed rework'],
+    [!!(w.harvest && hv.status?.configured), fmtHours(hv.status?.todayHours ?? 0), 'Harvest today'],
   ];
   const shown = items.filter((i) => i[0]);
   if (!shown.length) return null;

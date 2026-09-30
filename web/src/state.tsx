@@ -1,11 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type FactoryStatus, type ServerState, type Stats } from './api';
-import type { AgentConfig, LogEvent, Settings, Ticket } from './types';
+import type { AgentConfig, AttentionItem, LogEvent, Settings, Ticket } from './types';
 
 interface FactoryState {
   ready: boolean;
   connected: boolean;
   tickets: Ticket[];
+  attention: AttentionItem[];
+  /** open items the PM can act on right now */
+  needsYou: AttentionItem[];
   agents: AgentConfig[];
   settings: Settings | null;
   factory: FactoryStatus;
@@ -19,6 +22,7 @@ interface FactoryState {
 }
 
 const Ctx = createContext<FactoryState | null>(null);
+const KIND_RANK: Record<AttentionItem['kind'], number> = { error: 0, review: 1, decision: 2, todo: 3 };
 const MAX_LOGS = 600;
 
 export function FactoryProvider({ children }: { children: ReactNode }) {
@@ -62,6 +66,9 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
             setLogs((p) => (p.length >= MAX_LOGS ? [...p.slice(-MAX_LOGS + 1), msg.event] : [...p, msg.event]));
             listeners.current.forEach((fn) => fn(msg.event));
             break;
+          case 'attention':
+            setS((p) => p && { ...p, attention: msg.attention });
+            break;
           case 'agents':
             setS((p) => p && { ...p, agents: msg.agents });
             break;
@@ -90,6 +97,8 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
       ready: !!s,
       connected,
       tickets: s?.tickets ?? [],
+      attention: s?.attention ?? [],
+      needsYou: (s?.attention ?? []).filter((a) => a.status === 'open').sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.createdAt - b.createdAt),
       agents: s?.agents ?? [],
       settings: s?.settings ?? null,
       factory: s?.factory ?? { running: [], paused: false },

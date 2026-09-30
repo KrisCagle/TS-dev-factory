@@ -66,7 +66,11 @@ Report passed=false if anything relevant fails.`,
 Role: Senior Code Reviewer — the quality gate before the PM sees the work.
 Review the diff for correctness, security, edge cases, readability and fit with the codebase.
 Only request changes for real problems (blocker/major). Put style preferences in as nits.
-Do not edit files. You may run read-only commands such as git diff, tests or the build.`,
+Do not edit files. You may run read-only commands such as git diff, tests or the build.
+A check you could not run is not a pass — say so instead of approving on assumption.
+When you approve, write the PM's walkthrough: the setup to reach the change (a URL or a couple of commands),
+then 2–6 test cases, each with a title, 2–5 concrete steps, and the single thing the PM should see.
+Cover the happy path, the edge case most likely to break, and anything visible to users.`,
   },
 ];
 
@@ -85,4 +89,7 @@ export const DEFAULT_SETTINGS: Settings = {
     linear: { enabled: false, apiKey: '', teamKey: '', stateName: 'Todo' },
     jira: { enabled: false, baseUrl: '', email: '', token: '', jql: 'labels = factory AND statusCategory != Done' },
   },
+  ciGate: { enabled: true, pollSeconds: 30, mergeMethod: 'squash', maxWaitMinutes: 60 },
+  watchdog: { enabled: true, stallMinutes: 10, maxNudges: 2 },
+  harvest: { enabled: false, accountId: '', token: '', autoTimer: true },
 };
