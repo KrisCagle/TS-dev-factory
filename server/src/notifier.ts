@@ -18,7 +18,7 @@ const EVENT_LABEL: Record<NotifyEvent, string> = {
   stuck: 'Agent stuck',
 };
 
-function inQuietHours(from: string, to: string, now = new Date()) {
+export function inQuietHours(from: string, to: string, now = new Date()) {
   const m = now.getHours() * 60 + now.getMinutes();
   const [fh, fm] = from.split(':').map(Number);
   const [th, tm] = to.split(':').map(Number);

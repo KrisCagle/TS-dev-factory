@@ -93,6 +93,22 @@ For development with hot reload: `npm run dev`, then open http://localhost:5173.
 - `EALLOWSCRIPTS` during install: your user `.npmrc` sets `allow-scripts`, which npm rejects for project installs. On macOS/Linux, run `npm run setup` instead: it clears that setting for the install, then builds and starts the app.
 - `npm install` fails with 401/E404: your npm may point at a private registry. Run `npm install --registry=https://registry.npmjs.org/`.
 
+## Tests
+
+Everything runs against the simulated agents, so tests are free, fast and don't need an API key.
+
+```bash
+npm test              # unit + API tests (~60 tests, a few seconds)
+npm run test:e2e      # browser tests with Playwright: walkthrough, ship, projects, ticket writer…
+npm run test:all      # typecheck + both of the above
+```
+
+- **Unit and API tests** (`server/test`) cover the whole pipeline: rework loops, the CI gate, the watchdog, plan approval, escalation, budgets, restarts, inbox briefs, notifications, the ticket writer, settings upgrades, and secrets staying out of every response. The simulated agents run about 100× faster with seeded randomness, and each test can force an outcome (tests fail, reviewer pushes back, an agent hangs, CI goes red).
+- **End-to-end tests** (`e2e/`) drive the real UI in Chromium against a throwaway database and fail on any browser console error.
+- **GitHub Actions** runs typecheck, unit tests (Node 20 and 22) and the browser tests on every pull request.
+
+To watch a faster demo yourself: `FACTORY_MOCK_SPEED=0.2 npm start` runs the simulated agents 5× faster.
+
 ## Going live
 
 1. Authenticate the Claude Agent SDK by setting `ANTHROPIC_API_KEY` in the server's environment (for example `export ANTHROPIC_API_KEY=sk-ant-…` before `npm start`).
@@ -106,7 +122,7 @@ Agents load your repo's `CLAUDE.md`, so put team conventions there. You can edit
 
 **Notifications:** Mac notifications come from the factory server via `osascript`. For Slack, create an incoming webhook and paste it in Settings → Notifications; the same webhook is used for the daily standup.
 
-Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`.
+Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `FACTORY_MOCK_SPEED` (simulated agents only; 0.1 = 10× faster).
 
 **Harvest:** create a personal access token at Harvest ID → Developers. In Settings → Harvest, paste the token and your account ID, click **Test & load projects**, and pick a default project and task. Individual tickets can bill to a different project from the ticket drawer.
 
@@ -123,7 +139,8 @@ Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY
 
 ```
 server/src
-  index.ts            REST + WebSocket API, serves the built UI
+  index.ts            starts the server (reads env vars)
+  app.ts              createFactory(): REST + WebSocket API, serves the built UI
   orchestrator.ts     scheduler + pipeline (plan → code → test → review → CI → gates → ship), watchdog, reconcile
   attention.ts        the PM inbox: decision briefs, sign-off walkthroughs, escalations
   harvest-service.ts  PM time tracking (timers + manual entries)
@@ -140,6 +157,8 @@ server/src
   connectors/         github.ts (issues, PRs, checks) · linear.ts · jira.ts · harvest.ts
   git.ts              worktrees, commits, diff, merge, push
   store.ts            JSON-file store
+server/test           unit + API tests (vitest)
+e2e/                  browser tests (Playwright)
 web/src
   views/office/       animated office (layout, simulation, sprites)
   views/              Inbox, Board, Reports, House rules, Agents, Activity, Settings

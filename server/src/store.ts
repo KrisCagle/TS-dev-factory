@@ -77,7 +77,14 @@ export class Store extends EventEmitter {
         attention: raw.attention ?? [],
       };
     } catch (err) {
-      console.error('[store] could not read db, starting fresh:', err);
+      // Never silently overwrite a file we couldn't read: keep a copy next to it first.
+      const backup = `${this.file}.corrupt-${Date.now()}`;
+      try {
+        fs.copyFileSync(this.file, backup);
+      } catch {
+        /* nothing to keep */
+      }
+      console.error(`[store] could not read ${this.file} (kept a copy at ${backup}); starting fresh:`, err);
       return fresh;
     }
   }

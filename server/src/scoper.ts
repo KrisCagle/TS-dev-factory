@@ -53,7 +53,7 @@ export class Scoper {
   constructor(private store: Store) {}
 
   async draft(input: ScopeInput): Promise<ScopeDraft> {
-    const text = input.text.trim();
+    const text = String(input.text ?? '').trim();
     if (!text) throw Object.assign(new Error('Paste or type something to turn into a ticket.'), { status: 400 });
     const s = this.store.settings();
     if (s.mode === 'mock') return heuristic(text, input.answers);
