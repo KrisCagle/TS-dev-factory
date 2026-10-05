@@ -39,6 +39,10 @@ export function Office() {
 
   const sim = simRef.current;
   const zones = useMemo(() => zoneMap(prefs.office.zones), [prefs.office.zones]);
+  const [pluginRooms, setPluginRooms] = useState<Array<{ id: string; label: string; icon?: string }>>([]);
+  useEffect(() => {
+    api.plugins().then((p) => setPluginRooms(p.rooms)).catch(() => undefined);
+  }, []);
   sim.setZones(zones);
   sim.speed = prefs.office.speed;
 
@@ -220,6 +224,14 @@ export function Office() {
               {z.id === 'huddle' && <Huddle z={z} C={C} />}
               {z.id === 'servers' && <Servers z={z} C={C} t={t} busy={(stats?.inFlight ?? 0) > 0 || inCi.length > 0} ci={inCi.filter((x) => !sim.carried(x.id))} open={ui.openTicket} />}
               {z.id === 'ship' && <ShipDock z={z} C={C} t={t} shipped={shipped} launching={sim.launchUntil > sim.now} />}
+            </g>
+          ))}
+
+          {/* rooms added by plugins: booths along the corridor */}
+          {!editLayout && pluginRooms.map((r, i) => (
+            <g key={r.id} transform={`translate(${60 + i * 150} ${CORRIDOR_Y - 18})`}>
+              <rect width={136} height={36} rx={10} fill={C.room} stroke={C.wall} strokeWidth={2} />
+              <text x={68} y={23} textAnchor="middle" fontSize={12} fontWeight={600} fill={C.text}>{r.icon ?? '🔌'} {r.label}</text>
             </g>
           ))}
 

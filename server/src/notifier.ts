@@ -80,7 +80,10 @@ export class Notifier {
     }
     if (s.macos && process.platform === 'darwin') this.macos(n);
     if (s.browser) this.broadcast({ type: 'notify', notice: n });
-    if (s.slack.enabled && s.slack.webhookUrl) void this.slack(n).catch((e) => console.error('[notify] slack:', e.message));
+    // the Slack app already posts inbox items with buttons, so don't post them twice
+    const app = this.store.settings().slackApp;
+    const viaApp = n.event === 'needsYou' && app.enabled && !!app.botToken && !!app.channel;
+    if (s.slack.enabled && s.slack.webhookUrl && !viaApp) void this.slack(n).catch((e) => console.error('[notify] slack:', e.message));
   }
 
   private macos(n: Notice) {

@@ -26,6 +26,8 @@ interface FactoryState {
   onNotice: (fn: (n: Notice) => void) => () => void;
   /** XP, level, streak, quests, achievements, agent cards. */
   game: GameView | null;
+  /** Slack app connection status (Approve from Slack). */
+  slackApp?: { connected: boolean; error?: string };
   /** subscribe to celebrations (ship, achievement, level-up, quest) */
   onCelebrate: (fn: (e: Celebration) => void) => () => void;
   attention: AttentionItem[];
@@ -146,6 +148,7 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
         return () => noticeListeners.current.delete(fn);
       },
       game: s?.game ?? null,
+      slackApp: s?.slackApp,
       onCelebrate: (fn) => {
         celebrateListeners.current.add(fn);
         return () => celebrateListeners.current.delete(fn);

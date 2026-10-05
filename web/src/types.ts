@@ -20,7 +20,7 @@ export const STAGES: Stage[] = [
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export const PRIORITY_RANK: Record<Priority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-export type TicketSource = 'local' | 'github' | 'linear' | 'jira';
+export type TicketSource = 'local' | 'github' | 'linear' | 'jira' | 'sentry' | 'plugin';
 export type AgentRole = 'planner' | 'coder' | 'tester' | 'reviewer';
 export type Gate = 'plan' | 'merge';
 
@@ -225,6 +225,10 @@ export interface Ticket {
   resume?: 'code' | 'test';
   /** You took it over in your editor. */
   manual?: { since: number; from: Stage };
+  /** Where this ticket's inbox item was posted in Slack. */
+  slack?: { channel: string; ts: string; itemId: string };
+  /** Results from plugin agents and plugin quality gates. */
+  checks?: PluginCheck[];
   /** Questions you asked about this ticket, with the answers. */
   chat?: Array<{ q: string; a: string; at: number }>;
   createdAt: number;
@@ -249,6 +253,7 @@ export interface ConnectorSettings {
   github: { enabled: boolean; token: string; repo: string; label: string };
   linear: { enabled: boolean; apiKey: string; teamKey: string; stateName: string };
   jira: { enabled: boolean; baseUrl: string; email: string; token: string; jql: string };
+  sentry: { enabled: boolean; baseUrl: string; org: string; project: string; token: string; query: string; webhookSecret: string; autoImport: boolean };
 }
 
 export interface HarvestSettings {
@@ -292,6 +297,32 @@ export interface Settings {
   scoper: { model: string };
   quality: QualitySettings;
   forecast: ForecastSettings;
+  /** Per plugin: on/off and its own settings. Plugins are on unless switched off here. */
+  plugins?: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
+  /** Approve from Slack: a Slack app connected over Socket Mode (works without a public URL). */
+  slackApp: SlackAppSettings;
+}
+
+export interface SlackAppSettings {
+  enabled: boolean;
+  botToken: string;   // xoxb-…
+  appToken: string;   // xapp-… (Socket Mode)
+  channel: string;    // channel ID or #name
+  /** Slack user IDs allowed to approve; empty = anyone in the channel. */
+  approvers: string[];
+  /** The factory's address, for "Open in factory" links. */
+  factoryUrl: string;
+}
+
+export interface PluginCheck {
+  plugin: string;
+  id: string;
+  name: string;
+  kind: 'role' | 'gate';
+  ok: boolean;
+  message?: string;
+  /** Failed checks that only lower the safety score instead of sending the work back. */
+  flagOnly?: boolean;
 }
 
 export interface ForecastSettings {

@@ -17,6 +17,9 @@ import { Scoper } from './scoper.js';
 import { Game } from './game.js';
 import { Asker } from './asker.js';
 import { catchUp } from './catchup.js';
+import { Plugins } from './plugins.js';
+import { SlackApp } from './slack-app.js';
+import { toTicket as sentryTicket, verifySignature } from './connectors/sentry.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
@@ -39,6 +42,10 @@ export interface FactoryOptions {
   serveWeb?: boolean;
   /** Post the daily standup on schedule (default true). */
   schedules?: boolean;
+  /** Folder of factory plugins (default: plugins/ in the repo; set to '' to load none). */
+  pluginsDir?: string;
+  /** Override how plugin files are imported (tests). */
+  pluginImporter?: (file: string) => Promise<Record<string, unknown>>;
 }
 
 /** Builds the whole factory — store, orchestrator, services, REST + WebSocket API — without listening yet. */
@@ -61,8 +68,14 @@ export function createFactory(opts: FactoryOptions) {
   const notifier = new Notifier(store, (m) => broadcastLate(m));
   const reports = new Reports(store, notifier);
   const asker = new Asker(store);
+  const pluginsDir = opts.pluginsDir ?? process.env.FACTORY_PLUGINS_DIR ?? path.resolve(__dirname, '../../plugins');
+  const plugins = new Plugins(store, pluginsDir, opts.pluginImporter);
+  const pluginsReady = pluginsDir ? plugins.load().catch((e) => console.error('[plugins]', e)) : Promise.resolve();
+  store.on('settings', () => plugins.refreshEnabled());
+  const slackApp = new SlackApp(store, orch);
   const game = new Game(store, (event) => broadcastLate({ type: 'celebrate', event }));
   orch.hooks = {
+    plugins,
     rulesFor: (projectId) => rules.forPrompt(projectId),
     onFinished: (ticketId) => previews.stop(ticketId),
     afterTester: (ticketId, cwd) => artifacts.collect(ticketId, cwd),
@@ -70,7 +83,8 @@ export function createFactory(opts: FactoryOptions) {
   };
 
   const app = express();
-  app.use(express.json({ limit: '2mb' }));
+  // keep the raw body for webhook signature checks
+  app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { (req as unknown as { rawBody: Buffer }).rawBody = buf; } }));
 
   const wrap = (fn: (req: Request, res: Response) => unknown) => async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -111,6 +125,7 @@ export function createFactory(opts: FactoryOptions) {
     connectors: CONNECTORS.map((c) => ({ source: c.source, label: c.label, enabled: c.isEnabled(store.settings()) })),
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
     game: game.view(),
+    slackApp: slackApp.status,
   })));
 
   app.get('/api/logs', wrap((req) => store.logs(undefined, Number(req.query.limit ?? 300))));
@@ -238,6 +253,28 @@ export function createFactory(opts: FactoryOptions) {
     return d;
   }));
   app.get('/api/game', wrap(() => game.view()));
+  app.post('/api/slack-app/test', wrap(async () => {
+    const s = store.settings().slackApp;
+    if (!s.enabled) throw Object.assign(new Error('Turn on the Slack app first.'), { status: 400 });
+    return { message: await slackApp.test() };
+  }));
+
+  // ---------------------------------------------------------------- plugins
+  app.get('/api/plugins', wrap(() => plugins.summary()));
+  app.post('/api/plugins/sources/:id/sync', wrap(async (req) => {
+    const src = plugins.source(req.params.id);
+    if (!src) throw Object.assign(new Error('No enabled plugin source with that id'), { status: 404 });
+    const items = await src.pull();
+    let created = 0;
+    for (const it of items) {
+      const externalId = `${src.id}:${it.externalId}`;
+      const existing = store.tickets().find((t) => t.source === 'plugin' && t.externalId === externalId);
+      if (existing) continue;
+      store.createTicket({ title: it.title, description: it.description ?? '', priority: it.priority ?? 'medium', labels: it.labels ?? [], externalId, externalUrl: it.externalUrl, source: 'plugin', stage: 'backlog', projectId: req.body?.projectId });
+      created++;
+    }
+    return { fetched: items.length, created };
+  }));
 
   // ---------------------------------------------------------------- notifications & reports
   app.post('/api/notifications/test', wrap(() => {
@@ -272,12 +309,9 @@ export function createFactory(opts: FactoryOptions) {
   app.post('/api/factory/pause', wrap((req) => orch.setPaused(Boolean(req.body?.paused))));
 
   // ---------------------------------------------------------------- connectors
-  app.post('/api/connectors/:source/sync', wrap(async (req) => {
-    const c = connectorFor(req.params.source as TicketSource);
-    if (!c) throw Object.assign(new Error('unknown connector'), { status: 404 });
-    const s = store.settings();
-    if (!c.isEnabled(s)) throw Object.assign(new Error(`${c.label} is not configured`), { status: 400 });
-    const incoming = await c.pull(s);
+  /** Import from a tracker into Backlog; existing tickets get refreshed while they're still waiting. */
+  const importFrom = async (c: NonNullable<ReturnType<typeof connectorFor>>, projectId?: string) => {
+    const incoming = await c.pull(store.settings());
     let created = 0;
     for (const it of incoming) {
       const existing = store.tickets().find((t) => t.source === c.source && t.externalId === it.externalId);
@@ -285,11 +319,38 @@ export function createFactory(opts: FactoryOptions) {
         if (['backlog', 'ready'].includes(existing.stage)) store.updateTicket(existing.id, { title: it.title, description: it.description, priority: it.priority, labels: it.labels });
         continue;
       }
-      store.createTicket({ ...it, source: c.source, stage: 'backlog', projectId: (req.body?.projectId as string | undefined) ?? undefined });
+      store.createTicket({ ...it, source: c.source, stage: 'backlog', projectId });
       created++;
     }
     return { fetched: incoming.length, created };
+  };
+
+  app.post('/api/connectors/:source/sync', wrap(async (req) => {
+    const c = connectorFor(req.params.source as TicketSource);
+    if (!c) throw Object.assign(new Error('unknown connector'), { status: 404 });
+    if (!c.isEnabled(store.settings())) throw Object.assign(new Error(`${c.label} is not configured`), { status: 400 });
+    return importFrom(c, (req.body?.projectId as string | undefined) ?? undefined);
   }));
+
+  // Sentry can push new issues to us instead of waiting for an import (needs a URL Sentry can reach).
+  app.post('/api/webhooks/sentry', wrap((req) => {
+    const s = store.settings().connectors.sentry;
+    const raw = (req as unknown as { rawBody?: Buffer }).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
+    if (!s.enabled || !verifySignature(raw, req.header('sentry-hook-signature'), s.webhookSecret)) throw Object.assign(new Error('Invalid signature'), { status: 401 });
+    const issue = req.body?.data?.issue;
+    if (req.header('sentry-hook-resource') !== 'issue' || req.body?.action !== 'created' || !issue?.id) return { ignored: true };
+    if (store.tickets().some((t) => t.source === 'sentry' && t.externalId === String(issue.id))) return { duplicate: true };
+    const t = store.createTicket({ ...sentryTicket(issue), source: 'sentry', stage: 'backlog' });
+    return { created: t.key };
+  }));
+
+  // optional: pull new Sentry issues every 10 minutes
+  const sentryTimer = setInterval(() => {
+    const s = store.settings();
+    const c = connectorFor('sentry');
+    if (c && s.connectors.sentry.autoImport && c.isEnabled(s)) void importFrom(c).catch((e) => console.error('[sentry] auto-import:', e.message));
+  }, 10 * 60_000);
+  sentryTimer.unref();
 
   app.post('/api/connectors/:source/test', wrap(async (req) => {
     const c = connectorFor(req.params.source as TicketSource);
@@ -352,12 +413,17 @@ export function createFactory(opts: FactoryOptions) {
     store,
     orch,
     game,
+    plugins,
+    pluginsReady,
+    slackApp,
     /** Start listening and start the agents' scheduler. Resolves with the bound port. */
-    listen(port: number) {
+    async listen(port: number) {
+      await pluginsReady;
       return new Promise<number>((resolve) => {
         server.listen(port, () => {
           started = true;
           orch.start();
+          slackApp.start();
           if (opts.schedules !== false) reports.startSchedule();
           resolve((server.address() as { port: number }).port);
         });
@@ -365,6 +431,8 @@ export function createFactory(opts: FactoryOptions) {
     },
     /** Stop agents, previews and the HTTP server, and write the database to disk. */
     async close() {
+      clearInterval(sentryTimer);
+      slackApp.stop();
       orch.stop();
       previews.stopAll();
       reports.stopSchedule();

@@ -1,0 +1,11 @@
+{
+  "name": "factory",
+  "displayName": "AI Dev Factory",
+  "description": "Run your AI Dev Factory from Claude Code: write tickets, check status, clear your inbox, ask tickets questions and get the standup — without opening the dashboard.",
+  "version": "0.2.0",
+  "author": { "name": "Kris Cagle" },
+  "homepage": "https://github.com/KrisCagle/ai-dev-factory",
+  "repository": "https://github.com/KrisCagle/ai-dev-factory",
+  "license": "MIT",
+  "keywords": ["agents", "tickets", "project-management", "factory"]
+}

@@ -4,6 +4,7 @@ import { ClaudeRunner, type AgentRunner, type RunResult } from './agents/runner.
 import { MockRunner, mockDiff, type MockOptions } from './agents/mock.js';
 import * as A from './attention.js';
 import * as Q from './quality.js';
+import { view as pluginView, type Plugins } from './plugins.js';
 import { connectorFor, github } from './connectors/index.js';
 import * as g from './git.js';
 import type { HarvestService } from './harvest-service.js';
@@ -69,7 +70,7 @@ export class Orchestrator {
   private shuttingDown = false;
 
   /** Extension points used by other services (previews, artifacts). */
-  hooks: { rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
+  hooks: { plugins?: Plugins; rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
 
   constructor(private store: Store, private harvest: HarvestService, opts: OrchestratorOptions = {}) {
     this.mock = new MockRunner(opts.mock);
@@ -490,7 +491,7 @@ export class Orchestrator {
       for (;;) {
         this.checkBudget(id);
         if (!skipCoder) {
-          t = set({ stage: 'coding' });
+          t = set({ stage: 'coding', checks: undefined });
           if (t.iterations === 0) await this.sync(t, 'coding', 'Implementation started.');
           await this.runAgent(id, 'coder', coderPrompt(t), cwd, ac.signal);
           await this.commit(t, cwd, `${t.key}: ${t.title}${t.iterations ? ` (rev ${t.iterations})` : ''}`);
@@ -531,6 +532,7 @@ export class Orchestrator {
             this.loopBack(id, 'Acceptance criteria without proof');
             continue;
           }
+          if (await this.pluginRoles(id, 'tester', cwd, ac.signal)) continue;
         }
 
         if (this.store.agent('reviewer').enabled) {
@@ -547,6 +549,8 @@ export class Orchestrator {
           }
           await this.hooks.afterReview?.(id).catch(() => undefined);
         }
+        if (await this.pluginRoles(id, 'reviewer', cwd, ac.signal)) continue;
+        if (await this.pluginGates(id, cwd)) continue;
         break;
       }
 
@@ -603,6 +607,86 @@ export class Orchestrator {
       this.running.delete(id);
       this.store.emit('factory', this.status());
     }
+  }
+
+  // ------------------------------------------------------------------ plugin agents and gates
+  private saveCheck(id: string, check: NonNullable<Ticket['checks']>[number]) {
+    const t = this.store.ticket(id)!;
+    const rest = (t.checks ?? []).filter((c) => !(c.plugin === check.plugin && c.id === check.id));
+    this.store.updateTicket(id, { checks: [...rest, check] });
+  }
+
+  /** Extra agents from plugins (e.g. a security reviewer). Returns true if the work went back to the Coder. */
+  private async pluginRoles(id: string, after: 'tester' | 'reviewer', cwd: string, signal: AbortSignal): Promise<boolean> {
+    const roles = this.hooks.plugins?.rolesAfter(after) ?? [];
+    for (const role of roles) {
+      if (signal.aborted) throw new Cancelled();
+      let t = this.store.ticket(id)!;
+      if (!t.diff) t = this.store.updateTicket(id, { diff: await this.diff(t, cwd) })!;
+      this.log(id, 'factory', 'status', `${role.icon ?? '🔌'} ${role.name} started`);
+      let result: { passed: boolean; summary: string; findings?: Array<{ file?: string; line?: number; severity?: string; comment: string }> };
+      try {
+        if (this.store.settings().mode === 'mock') {
+          await new Promise((r) => setTimeout(r, 1500 * this.speed));
+          result = role.mock ? role.mock(pluginView(t)) : { passed: true, summary: 'No issues found.' };
+        } else {
+          const agent = { role: 'reviewer' as const, name: role.name, enabled: true, model: role.model ?? 'sonnet', color: '#64748b', maxTurns: 25, allowedTools: role.tools ?? ['Read', 'Glob', 'Grep'], systemPrompt: `You are the ${role.name} in an AI software factory. Report passed=false only for real problems that must be fixed before shipping.` };
+          const r = await this.runner.run({
+            agent, cwd, signal, schema: PLUGIN_ROLE_SCHEMA, prompt: role.prompt(pluginView(t)),
+            onEvent: (kind, text) => kind === 'tool' && this.log(id, 'factory', 'tool', `${role.name}: ${text}`),
+          });
+          const cur = this.store.ticket(id)!;
+          this.store.updateTicket(id, { costUsd: +(cur.costUsd + r.costUsd).toFixed(4), tokens: cur.tokens + r.tokens });
+          const o = (r.structured ?? {}) as Record<string, unknown>;
+          result = { passed: o.passed !== false, summary: String(o.summary ?? r.text.slice(0, 300)), findings: Array.isArray(o.findings) ? (o.findings as typeof result.findings) : [] };
+        }
+      } catch (e) {
+        if (signal.aborted) throw new Cancelled();
+        this.log(id, 'factory', 'error', `${role.name} failed to run: ${e instanceof Error ? e.message : e} — skipping it.`);
+        continue;
+      }
+      this.saveCheck(id, { plugin: role.plugin, id: role.id, name: role.name, kind: 'role', ok: result.passed, message: result.summary });
+      this.log(id, 'factory', 'result', `${result.passed ? '✅' : '🔁'} ${role.name}: ${result.summary}`);
+      if (!result.passed) {
+        const cur = this.store.ticket(id)!;
+        this.store.updateTicket(id, {
+          review: {
+            verdict: 'request_changes',
+            summary: `${role.name}: ${result.summary}`,
+            comments: (result.findings ?? []).map((f) => ({ file: f.file, line: f.line, severity: (['blocker', 'major', 'minor', 'nit'].includes(String(f.severity)) ? f.severity : 'major') as 'major', comment: f.comment })),
+            walkthrough: cur.review?.walkthrough,
+          },
+        });
+        this.loopBack(id, `${role.name} requested changes`);
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** Quality gates from plugins. Returns true if the work went back to the Coder. */
+  private async pluginGates(id: string, cwd: string): Promise<boolean> {
+    const gates = this.hooks.plugins?.activeGates() ?? [];
+    if (!gates.length) return false;
+    let t = this.store.ticket(id)!;
+    if (!t.diff) t = this.store.updateTicket(id, { diff: await this.diff(t, cwd) })!;
+    for (const g of gates) {
+      let r: { ok: boolean; message?: string };
+      try {
+        r = await g.check(pluginView(t));
+      } catch (e) {
+        r = { ok: true, message: `skipped (${e instanceof Error ? e.message : e})` };
+      }
+      const flagOnly = g.onFail === 'flag';
+      this.saveCheck(id, { plugin: g.plugin, id: g.id, name: g.name, kind: 'gate', ok: !!r.ok, message: r.message, flagOnly });
+      this.log(id, 'factory', 'status', `${r.ok ? '✅' : flagOnly ? '⚠️' : '🔁'} ${g.name}${r.message ? `: ${r.message}` : ''}`);
+      if (!r.ok && !flagOnly) {
+        this.store.updateTicket(id, { testReport: { ...(t.testReport ?? { passed: true, summary: '', failures: [] }), passed: false, summary: `${g.name} failed`, failures: [r.message ?? `${g.name} failed`] } });
+        this.loopBack(id, `${g.name} gate failed`);
+        return true;
+      }
+    }
+    return false;
   }
 
   /** Scale the Planner's forecast by how this project's past forecasts turned out. */
@@ -970,6 +1054,16 @@ function normPath(f: string) {
 }
 
 const money = (n: number) => `$${n.toFixed(2)}`;
+
+const PLUGIN_ROLE_SCHEMA = {
+  type: 'object',
+  properties: {
+    passed: { type: 'boolean' },
+    summary: { type: 'string' },
+    findings: { type: 'array', items: { type: 'object', properties: { file: { type: 'string' }, line: { type: 'number' }, severity: { type: 'string', enum: ['blocker', 'major', 'minor', 'nit'] }, comment: { type: 'string' } }, required: ['comment'] } },
+  },
+  required: ['passed', 'summary'],
+};
 
 function normalizeTest(x: unknown, text: string): TestReport {
   const o = (x ?? {}) as Record<string, unknown>;
