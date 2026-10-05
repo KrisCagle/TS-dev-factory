@@ -14,7 +14,7 @@ const mock: MockOptions = {};
 if (speed) mock.speed = speed;
 if (process.env.FACTORY_MOCK_SEED) mock.random = seeded(Number(process.env.FACTORY_MOCK_SEED));
 if (process.env.FACTORY_MOCK_HAPPY === '1') {
-  Object.assign(mock, { testsPass: () => true, reviewRequestsChanges: () => false, hangs: () => false, ciPasses: () => true });
+  Object.assign(mock, { testsPass: () => true, reviewRequestsChanges: () => false, hangs: () => false, ciPasses: () => true, smokePasses: () => true, coverageDrops: () => false, leavesUnproven: () => false });
 }
 
 const factory = createFactory({

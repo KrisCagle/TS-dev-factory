@@ -82,6 +82,8 @@ export const api = {
   reject: (id: string, feedback: string) => req('POST', `/api/tickets/${id}/reject`, { feedback }),
   cancel: (id: string) => req('POST', `/api/tickets/${id}/cancel`),
   retry: (id: string) => req('POST', `/api/tickets/${id}/retry`),
+  revert: (id: string, opts: { redo?: boolean; note?: string } = {}) => req<{ redo?: Ticket }>('POST', `/api/tickets/${id}/revert`, opts),
+  smoke: (id: string) => req('POST', `/api/tickets/${id}/smoke`),
   note: (id: string, text: string) => req('POST', `/api/tickets/${id}/notes`, { text }),
   updateAgent: (role: AgentRole, a: Partial<AgentConfig>) => req<AgentConfig>('PATCH', `/api/agents/${role}`, a),
   resetAgent: (role: AgentRole) => req<AgentConfig>('POST', `/api/agents/${role}/reset`),

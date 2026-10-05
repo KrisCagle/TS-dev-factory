@@ -34,6 +34,45 @@ export interface TestReport {
   passed: boolean;
   summary: string;
   failures: string[];
+  /** How many tests the Tester added for this change. */
+  testsAdded?: number;
+  /** One entry per acceptance criterion: is there a passing test or screenshot proving it? */
+  criteria?: CriterionProof[];
+  /** Line coverage before/after the change, when the project can measure it. */
+  coverage?: CoverageReport;
+}
+
+export interface CriterionProof {
+  criterion: string;
+  status: 'proven' | 'unproven' | 'failed';
+  /** The test name, screenshot or command output that proves it. */
+  evidence?: string;
+}
+
+export interface CoverageReport {
+  /** Percent of lines covered on the base branch (all files). */
+  before?: number;
+  /** Percent of lines covered with this change applied. */
+  after?: number;
+  /** Coverage of the files this change touched. */
+  files?: Array<{ file: string; pct: number }>;
+}
+
+/** How safe a change looks before you sign off, with the reasons. */
+export interface Confidence {
+  score: number; // 0–100
+  level: 'high' | 'medium' | 'low';
+  reasons: Array<{ ok: boolean; text: string }>;
+}
+
+/** What happened after a ticket shipped. */
+export interface ShipInfo {
+  /** Commit that landed on the base branch (merge or squash commit). */
+  sha?: string;
+  how: 'local-merge' | 'pull-request' | 'branch' | 'simulated';
+  at: number;
+  smoke?: { state: 'running' | 'passed' | 'failed' | 'skipped'; output?: string; at: number };
+  reverted?: { at: number; prUrl?: string; sha?: string; note?: string };
 }
 
 export interface ReviewComment {
@@ -125,6 +164,8 @@ export interface Project {
   previewCommand?: string; // e.g. "npm run dev -- --port $PORT"
   previewPath?: string;    // e.g. "/" or "/login"
   rules?: string;          // house rules when the repo has no CLAUDE.md we can write
+  smokeCommand?: string;   // run on the base branch after shipping, e.g. "npm test"
+  riskyPaths?: string[];   // touching these lowers the safety score, e.g. "migrations/", "auth"
 }
 
 export interface Ticket {
@@ -158,6 +199,8 @@ export interface Ticket {
   harvest?: { projectId?: number; taskId?: number; timer?: HarvestTimer; loggedHours: number };
   artifacts?: Artifact[];
   preview?: PreviewState;
+  confidence?: Confidence;
+  ship?: ShipInfo;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -221,6 +264,16 @@ export interface Settings {
   notifications: NotificationSettings;
   reports: { dailySlack: boolean; dailyTime: string; lastSent?: string };
   scoper: { model: string };
+  quality: QualitySettings;
+}
+
+export interface QualitySettings {
+  /** Send the change back to the Coder when an acceptance criterion has no proof. Off = flag it in your review. */
+  requireProof: boolean;
+  /** Send it back when coverage drops by more than maxDropPct points. */
+  coverage: { enabled: boolean; maxDropPct: number };
+  /** Run the project's smoke command on the base branch after shipping, and offer a revert if it fails. */
+  smoke: boolean;
 }
 
 // ---------------------------------------------------------------- attention (the PM's inbox)

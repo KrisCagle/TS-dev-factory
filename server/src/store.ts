@@ -70,6 +70,7 @@ export class Store extends EventEmitter {
           notifications: mergeNotifications(fresh.settings.notifications, rs.notifications),
           reports: { ...fresh.settings.reports, ...(rs.reports ?? {}) },
           scoper: { ...fresh.settings.scoper, ...(rs.scoper ?? {}) },
+          quality: mergeQuality(fresh.settings.quality, rs.quality),
           projects,
           defaultProjectId,
         },
@@ -315,6 +316,7 @@ export class Store extends EventEmitter {
       notifications: mergeNotifications(cur.notifications, patch.notifications),
       reports: { ...cur.reports, ...(patch.reports ?? {}) },
       scoper: { ...cur.scoper, ...(patch.scoper ?? {}) },
+      quality: mergeQuality(cur.quality, patch.quality),
       projects: patch.projects?.length ? patch.projects : cur.projects,
     };
     if (next.harvest.token === MASK) next.harvest.token = cur.harvest.token;
@@ -343,6 +345,10 @@ function mergeNotifications(base: Settings['notifications'], patch?: Partial<Set
     events: { ...base.events, ...(patch?.events ?? {}) },
     quietHours: { ...base.quietHours, ...(patch?.quietHours ?? {}) },
   };
+}
+
+function mergeQuality(base: Settings['quality'], patch?: Partial<Settings['quality']>): Settings['quality'] {
+  return { ...base, ...(patch ?? {}), coverage: { ...base.coverage, ...(patch?.coverage ?? {}) } };
 }
 
 export { DEFAULT_PROJECT_ID };

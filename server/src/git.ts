@@ -1,4 +1,5 @@
-import { execFile } from 'node:child_process';
+import { execFile, spawn } from 'node:child_process';
+import os from 'node:os';
 import { promisify } from 'node:util';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -83,4 +84,58 @@ export async function excludeFactoryDir(dir: string) {
 export async function listFiles(dir: string) {
   const out = await git(dir, 'ls-files');
   return out ? out.split('\n') : [];
+}
+
+/** Run a shell command (e.g. the project's smoke test) and keep the tail of its output. */
+export function runShell(cwd: string, command: string, timeoutMs = 10 * 60_000): Promise<{ code: number; output: string; timedOut: boolean }> {
+  return new Promise((resolve) => {
+    const p = spawn('bash', ['-lc', command], { cwd, env: { ...process.env, CI: '1', FORCE_COLOR: '0' } });
+    let out = '';
+    const keep = (d: Buffer) => {
+      out += d.toString();
+      if (out.length > 16_000) out = out.slice(-12_000);
+    };
+    p.stdout.on('data', keep);
+    p.stderr.on('data', keep);
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      p.kill('SIGTERM');
+    }, timeoutMs);
+    p.on('error', (e) => {
+      clearTimeout(timer);
+      resolve({ code: 127, output: `${out}\n${e.message}`.trim(), timedOut });
+    });
+    p.on('close', (code) => {
+      clearTimeout(timer);
+      resolve({ code: code ?? 1, output: out.trim().slice(-6_000), timedOut });
+    });
+  });
+}
+
+/** A throwaway checkout of `ref` (for smoke tests and reverts) that never touches your working copy. */
+export async function tempWorktree(repoPath: string, ref: string) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-check-'));
+  fs.rmSync(dir, { recursive: true, force: true });
+  await git(repoPath, 'worktree', 'add', '--detach', dir, ref);
+  return { dir, remove: () => removeWorktree(repoPath, dir) };
+}
+
+/** The ref for the latest base branch: origin/<base> after a fetch when there is a remote, otherwise the local branch. */
+export async function latestBase(repoPath: string, base: string) {
+  try {
+    await git(repoPath, 'fetch', 'origin', base);
+    return `origin/${base}`;
+  } catch {
+    return base;
+  }
+}
+
+/** Undo a shipped commit with a new commit (merge commits are reverted against their first parent). */
+export async function revertCommit(cwd: string, sha: string, message: string) {
+  const parents = (await git(cwd, 'rev-list', '--parents', '-n', '1', sha)).split(' ').length - 1;
+  const args = ['-c', 'user.name=AI Dev Factory', '-c', 'user.email=factory@localhost', 'revert', '--no-edit', ...(parents > 1 ? ['-m', '1'] : []), sha];
+  await git(cwd, ...args);
+  await git(cwd, '-c', 'user.name=AI Dev Factory', '-c', 'user.email=factory@localhost', 'commit', '--amend', '-m', message);
+  return git(cwd, 'rev-parse', 'HEAD');
 }

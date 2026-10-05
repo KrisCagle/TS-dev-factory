@@ -20,6 +20,12 @@ export interface MockOptions {
   hangs?: (key: string, role: string) => boolean;
   /** Simulated CI result for a ticket's first run (later runs always pass). */
   ciPasses?: (key: string) => boolean;
+  /** Does the base branch's smoke test pass after this ticket ships? */
+  smokePasses?: (key: string) => boolean;
+  /** Does this run of the Tester report a coverage drop? */
+  coverageDrops?: (key: string) => boolean;
+  /** Should the Tester leave this criterion unproven? */
+  leavesUnproven?: (key: string, criterion: string) => boolean;
 }
 
 /** Small deterministic PRNG (mulberry32) for reproducible simulated runs. */
@@ -98,9 +104,19 @@ export class MockRunner implements AgentRunner {
         return { ...base, text: 'Implemented the change.' };
       case 'tester': {
         const passed = this.opts.testsPass ? this.opts.testsPass(key) : random() > 0.2;
+        const criteria = criteriaFrom(prompt).map((criterion, i) => {
+          const skip = this.opts.leavesUnproven ? this.opts.leavesUnproven(key, criterion) : random() < 0.12;
+          return skip
+            ? { criterion, status: 'unproven', evidence: undefined }
+            : { criterion, status: passed ? 'proven' : 'failed', evidence: `${key.toLowerCase()}.test.ts › ${criterion.toLowerCase().slice(0, 48)}${i === 0 ? ' (+ screenshot 01-happy-path.png)' : ''}` };
+        });
+        const drops = this.opts.coverageDrops ? this.opts.coverageDrops(key) : random() < 0.08;
+        const before = +(78 + random() * 10).toFixed(1);
+        const after = +(drops ? before - 1.5 - random() * 2 : before + random() * 1.2).toFixed(1);
+        const coverage = { before, after, files: [{ file: `src/features/${key.toLowerCase()}.ts`, pct: drops ? 61 : 92 }] };
         const structured = passed
-          ? { passed, summary: 'All 42 tests pass, added 3 new tests.', failures: [] }
-          : { passed, summary: '1 test failing.', failures: ['format.test.ts › handles empty input — expected "" but got undefined'] };
+          ? { passed, summary: 'All 42 tests pass, added 3 new tests.', failures: [], testsAdded: 3, criteria, coverage }
+          : { passed, summary: '1 test failing.', failures: ['format.test.ts › handles empty input — expected "" but got undefined'], testsAdded: 2, criteria, coverage };
         onEvent('text', structured.summary);
         return { ...base, text: structured.summary, structured };
       }
@@ -121,6 +137,13 @@ export class MockRunner implements AgentRunner {
       }
     }
   }
+}
+
+/** The numbered criteria list the tester prompt includes, so the simulated Tester can answer per criterion. */
+function criteriaFrom(prompt: string) {
+  const block = prompt.split('## Prove every acceptance criterion')[1];
+  if (!block) return ['The change works as described'];
+  return [...block.matchAll(/^\d+\. (.+)$/gm)].map((m) => m[1]);
 }
 
 function mockWalkthrough(prompt: string) {

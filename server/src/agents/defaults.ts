@@ -115,4 +115,5 @@ export const DEFAULT_SETTINGS: Settings = {
   },
   reports: { dailySlack: false, dailyTime: '08:45' },
   scoper: { model: 'sonnet' },
+  quality: { requireProof: false, coverage: { enabled: true, maxDropPct: 0.5 }, smoke: true },
 };

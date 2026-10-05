@@ -19,6 +19,10 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Rework loop**: failed tests or requested review changes go back to the Coder automatically. When the rework limit is hit, the ticket comes to you.
 - **Watchdog** ⏰: an agent that goes quiet (a hung command, a wait that never ends) is restarted with a nudge. You only hear about it if nudging doesn't work.
 - **CI-aware merge gate** 🚦: with pull requests, the factory opens the PR first and holds your sign-off until checks are green. Red CI goes back to the Coder, not to you. On approval the PR is merged with squash, merge or rebase.
+- **Proof for every acceptance criterion** ✅: the Tester maps each item in the ticket's "Acceptance criteria" checklist to the passing test or screenshot that proves it. Anything without proof is flagged in your sign-off, or sent back to the Coder if you turn on *Require proof*.
+- **Coverage gate**: when a project can measure test coverage, a change that lowers it by more than the allowed amount goes back to the Coder. The before → after numbers show in your review.
+- **Safety score** 🛡: every sign-off shows a 0–100 confidence score (tests added, criteria proven, CI, change size, sensitive files touched, rework loops) and exactly why, so you know where to look closer.
+- **Smoke test and one-click revert** 🧯: after shipping, the factory runs the project's smoke command on the base branch. If it fails, your inbox offers **Revert & redo** (a revert commit or revert PR, plus a redo ticket with the failure attached) or a fix-forward ticket. Any shipped ticket can be reverted from its drawer.
 - **House rules** 📐: edit the conventions every agent follows. They're saved in the repo's `CLAUDE.md`, and feedback you keep giving on tickets is suggested as new rules.
 
 ### Your job as PM
