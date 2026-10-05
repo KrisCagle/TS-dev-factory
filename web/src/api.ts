@@ -61,6 +61,18 @@ export interface Report {
   markdown: string;
 }
 
+export interface CatchUp {
+  since: number;
+  awayMs: number;
+  headline: string;
+  shipped: Array<{ id: string; key: string; title: string }>;
+  needsYou: Array<{ id: string; ticketId?: string; title: string; isNew: boolean }>;
+  problems: Array<{ id: string; key: string; title: string; what: string }>;
+  started: Array<{ id: string; key: string; title: string; stage: string }>;
+  spendUsd: number;
+  quiet: boolean;
+}
+
 export interface ServerState {
   tickets: Ticket[];
   attention: AttentionItem[];
@@ -87,6 +99,10 @@ export const api = {
   revert: (id: string, opts: { redo?: boolean; note?: string } = {}) => req<{ redo?: Ticket }>('POST', `/api/tickets/${id}/revert`, opts),
   smoke: (id: string) => req('POST', `/api/tickets/${id}/smoke`),
   game: () => req<GameView>('GET', '/api/game'),
+  takeover: (id: string, openEditor = true) => req<{ worktree?: string }>('POST', `/api/tickets/${id}/takeover`, { openEditor }),
+  handback: (id: string, note?: string) => req('POST', `/api/tickets/${id}/handback`, { note }),
+  ask: (id: string, question: string) => req<{ q: string; a: string }>('POST', `/api/tickets/${id}/ask`, { question }),
+  catchup: (since: number, projectId?: string) => req<CatchUp>('GET', `/api/catchup?since=${since}${projectId ? `&projectId=${projectId}` : ''}`),
   note: (id: string, text: string) => req('POST', `/api/tickets/${id}/notes`, { text }),
   updateAgent: (role: AgentRole, a: Partial<AgentConfig>) => req<AgentConfig>('PATCH', `/api/agents/${role}`, a),
   resetAgent: (role: AgentRole) => req<AgentConfig>('POST', `/api/agents/${role}/reset`),

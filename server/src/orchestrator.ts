@@ -15,7 +15,7 @@ import {
   type AgentRole, type AttentionItem, type ShipInfo, type LoopCause, type CaseVerdict, type CiCheck, type CheckState, type Plan, type Review, type Stage, type TestReport, type Ticket,
 } from './types.js';
 
-type Phase = 'plan' | 'code';
+type Phase = 'plan' | 'code' | 'test';
 const ACTIVE: Stage[] = ['planning', 'coding', 'testing', 'reviewing'];
 
 class Cancelled extends Error {}
@@ -54,6 +54,8 @@ export interface ResolveInput {
 
 export class Orchestrator {
   private running = new Map<string, AbortController>();
+  /** Tickets being taken over by the PM while an agent was mid-run (value: the stage they were in). */
+  private toPm = new Map<string, Stage>();
   private activity = new Map<string, Activity>();
   private ciPolled = new Map<string, number>();
   private mockCiPolls = new Map<string, number>();
@@ -134,14 +136,79 @@ export class Orchestrator {
   private tick() {
     if (this.paused) return;
     const { concurrency } = this.store.settings();
-    if (this.running.size >= concurrency) return;
-    const queue = this.store
-      .tickets()
+    const all = this.store.tickets();
+    const queue = all
       .filter((t) => t.stage === 'ready' && !this.running.has(t.id))
       .sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.order - b.order);
-    for (const t of queue.slice(0, concurrency - this.running.size)) {
-      void this.pipeline(t.id, t.plan && !this.store.agent('planner').enabled ? 'code' : 'plan');
+    let free = concurrency - this.running.size;
+    for (const t of queue) {
+      const wait = this.blockers(t, all);
+      if (JSON.stringify(wait) !== JSON.stringify(t.waitingOn)) this.store.updateTicket(t.id, { waitingOn: wait });
+      if (wait || free <= 0) continue;
+      free--;
+      const phase: Phase = t.resume ?? (t.plan && !this.store.agent('planner').enabled ? 'code' : 'plan');
+      void this.pipeline(t.id, phase);
     }
+  }
+
+  /** What's stopping a ready ticket: an unshipped dependency, or files another running ticket is changing. */
+  private blockers(t: Ticket, all: Ticket[]): Ticket['waitingOn'] {
+    const deps = (t.dependsOn ?? []).map((id) => all.find((x) => x.id === id)).filter((x): x is Ticket => !!x && x.stage !== 'done');
+    if (deps.length) return { reason: 'dependency', keys: deps.map((d) => d.key) };
+    if (t.plan?.files.length && t.resume) {
+      const clash = this.overlaps(t, all);
+      if (clash) return clash;
+    }
+    return undefined;
+  }
+
+  /** Another ticket that's being worked right now plans to touch the same files. */
+  private overlaps(t: Ticket, all: Ticket[]): Ticket['waitingOn'] {
+    const mine = new Set((t.plan?.files ?? []).map(normPath).filter(Boolean));
+    if (!mine.size) return undefined;
+    const busy = all.filter((x) => x.id !== t.id && x.projectId === t.projectId && (this.running.has(x.id) || ['coding', 'testing', 'reviewing', 'ci', 'manual'].includes(x.stage)) && x.stage !== 'planning');
+    const keys: string[] = [];
+    const files = new Set<string>();
+    for (const b of busy) {
+      const hit = (b.plan?.files ?? []).map(normPath).filter((f) => mine.has(f));
+      if (hit.length) {
+        keys.push(b.key);
+        hit.forEach((f) => files.add(f));
+      }
+    }
+    return keys.length ? { reason: 'overlap', keys, files: [...files].slice(0, 6) } : undefined;
+  }
+
+  // ------------------------------------------------------------------ hand-off to your editor
+  /** You take the ticket over in your editor: the agents stop and leave its branch alone. */
+  takeOver(id: string) {
+    const t = this.store.ticket(id);
+    if (!t) throw Object.assign(new Error('Ticket not found'), { status: 404 });
+    if (t.stage === 'done' || t.stage === 'manual') throw Object.assign(new Error(t.stage === 'done' ? 'This ticket has shipped.' : 'You already have it.'), { status: 409 });
+    this.store.closeAttentionFor(id);
+    this.hooks.onFinished?.(id);
+    const ac = this.running.get(id);
+    if (ac) {
+      // the running pipeline notices the abort and hands the ticket to you
+      this.toPm.set(id, t.stage);
+      ac.abort();
+    } else this.markManual(id, t.stage);
+    return { worktree: t.worktree };
+  }
+
+  private markManual(id: string, from: Stage) {
+    this.store.updateTicket(id, { stage: 'manual', manual: { since: Date.now(), from }, activeAgent: undefined, gate: undefined, waitingOn: undefined });
+    this.log(id, 'pm', 'pm', '🧑‍💻 Taken over by the PM — agents paused on this ticket.');
+  }
+
+  /** Hand it back: the Tester and Reviewer check your edits (the Coder only steps in if something fails). */
+  handBack(id: string, note?: string) {
+    const t = this.store.ticket(id);
+    if (!t) throw Object.assign(new Error('Ticket not found'), { status: 404 });
+    if (t.stage !== 'manual') throw Object.assign(new Error('This ticket isn’t with you.'), { status: 409 });
+    if (note?.trim()) this.addNote(id, `PM edited this by hand: ${note.trim()}`);
+    this.store.updateTicket(id, { stage: 'ready', resume: 'test', manual: undefined, iterations: 0 });
+    this.log(id, 'pm', 'pm', `↩ Handed back to the agents${note?.trim() ? `: ${note.trim()}` : ''} — testing your changes next.`);
   }
 
   // ------------------------------------------------------------------ PM actions
@@ -153,8 +220,11 @@ export class Orchestrator {
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
     this.log(id, 'pm', 'pm', `Approved ${t.gate === 'plan' ? 'the plan' : 'the change'}${note ? `: ${note}` : ''}`);
-    if (t.gate === 'plan') void this.pipeline(id, 'code');
-    else void this.finalize(id);
+    if (t.gate === 'plan') {
+      // back in the queue so concurrency, dependencies and file overlaps still apply
+      this.store.updateTicket(id, { stage: 'ready', resume: 'code', gate: undefined });
+      this.tick();
+    } else void this.finalize(id);
   }
 
   reject(id: string, feedback: string) {
@@ -386,31 +456,46 @@ export class Orchestrator {
     const set = (patch: Partial<Ticket>) => this.store.updateTicket(id, patch)!;
 
     try {
-      let t = set({ stage: from === 'plan' ? 'planning' : 'coding', gate: undefined, error: undefined, startedAt: this.store.ticket(id)!.startedAt ?? Date.now() });
+      let t = set({ stage: from === 'plan' ? 'planning' : from === 'test' ? 'testing' : 'coding', gate: undefined, error: undefined, resume: undefined, waitingOn: undefined, startedAt: this.store.ticket(id)!.startedAt ?? Date.now() });
       const cwd = await this.workspace(t);
+      if (from === 'test') await this.commit(t, cwd, `${t.key}: PM edits`);
 
       // ---- plan
       if (from === 'plan' && this.store.agent('planner').enabled) {
         await this.sync(t, 'planning', 'Picked up by the factory. Planning…');
         const r = await this.runAgent(id, 'planner', plannerPrompt(t), cwd, ac.signal, PLAN_SCHEMA);
-        const plan = normalizePlan(r.structured, r.text);
+        const plan = this.calibrated(t, normalizePlan(r.structured, r.text));
         t = set({ plan });
         this.log(id, 'planner', 'result', `Plan: ${plan.summary}`);
-        if (s.gates.plan) {
+        const est = plan.estimate;
+        if (est) this.log(id, 'planner', 'status', `📏 Forecast: size ${est.size}, about ${money(est.adjustedCostUsd ?? est.costUsd)} and ${Math.round(est.adjustedMinutes ?? est.minutes)} min`);
+        const pricey = !!est && s.forecast.approveAboveUsd > 0 && (est.adjustedCostUsd ?? est.costUsd) > s.forecast.approveAboveUsd;
+        if (s.gates.plan || pricey) {
           t = set({ stage: 'awaiting_approval', gate: 'plan', activeAgent: undefined });
-          this.store.postAttention(A.planGate(t));
-          this.log(id, 'factory', 'status', 'Plan ready — waiting for PM approval.');
+          this.store.postAttention(A.planGate(t, pricey ? s.forecast.approveAboveUsd : undefined));
+          this.log(id, 'factory', 'status', pricey ? `Forecast is over your ${money(s.forecast.approveAboveUsd)} limit — waiting for PM approval.` : 'Plan ready — waiting for PM approval.');
+          return;
+        }
+        // don't start coding while another running ticket is changing the same files
+        const clash = this.overlaps(t, this.store.tickets());
+        if (clash) {
+          set({ stage: 'ready', resume: 'code', waitingOn: clash, activeAgent: undefined });
+          this.log(id, 'factory', 'status', `⏸ Waiting: ${clash.keys.join(', ')} ${clash.keys.length === 1 ? 'is' : 'are'} changing ${clash.files!.join(', ')}. Coding starts when ${clash.keys.length === 1 ? 'it' : 'they'} finish${clash.keys.length === 1 ? 'es' : ''}.`);
           return;
         }
       }
 
       // ---- code / test / review loop
+      let skipCoder = from === 'test'; // handed back from your editor: test your edits first
       for (;;) {
         this.checkBudget(id);
-        t = set({ stage: 'coding' });
-        if (t.iterations === 0) await this.sync(t, 'coding', 'Implementation started.');
-        await this.runAgent(id, 'coder', coderPrompt(t), cwd, ac.signal);
-        await this.commit(t, cwd, `${t.key}: ${t.title}${t.iterations ? ` (rev ${t.iterations})` : ''}`);
+        if (!skipCoder) {
+          t = set({ stage: 'coding' });
+          if (t.iterations === 0) await this.sync(t, 'coding', 'Implementation started.');
+          await this.runAgent(id, 'coder', coderPrompt(t), cwd, ac.signal);
+          await this.commit(t, cwd, `${t.key}: ${t.title}${t.iterations ? ` (rev ${t.iterations})` : ''}`);
+        }
+        skipCoder = false;
 
         if (this.store.agent('tester').enabled) {
           t = set({ stage: 'testing' });
@@ -493,6 +578,9 @@ export class Orchestrator {
       const t = this.store.ticket(id);
       if (this.shuttingDown || !t) {
         // leave the stage alone — the constructor re-queues it on next start
+      } else if (this.toPm.has(id)) {
+        this.markManual(id, this.toPm.get(id)!);
+        this.toPm.delete(id);
       } else if (err instanceof Cancelled || ac.signal.aborted) {
         set({ stage: 'backlog', activeAgent: undefined });
         this.log(id, 'pm', 'pm', 'Cancelled by PM — moved back to backlog.');
@@ -515,6 +603,14 @@ export class Orchestrator {
       this.running.delete(id);
       this.store.emit('factory', this.status());
     }
+  }
+
+  /** Scale the Planner's forecast by how this project's past forecasts turned out. */
+  private calibrated(t: Ticket, plan: Plan): Plan {
+    if (!plan.estimate) return plan;
+    const c = this.store.calibration(t.projectId);
+    if (!c || c.n < 2) return plan;
+    return { ...plan, estimate: { ...plan.estimate, adjustedCostUsd: +(plan.estimate.costUsd * c.costRatio).toFixed(2), adjustedMinutes: Math.round(plan.estimate.minutes * c.timeRatio) } };
   }
 
   /** Work out the safety score for the sign-off and keep it on the ticket. */
@@ -834,7 +930,9 @@ export class Orchestrator {
     this.hooks.onFinished?.(id);
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
-    const done = this.store.updateTicket(id, { stage: 'done', gate: undefined, activeAgent: undefined, finishedAt: Date.now(), prUrl, worktree: s.mergeStrategy === 'none' ? t.worktree : undefined })!;
+    const done = this.store.updateTicket(id, { stage: 'done', gate: undefined, activeAgent: undefined, finishedAt: Date.now(), prUrl, worktree: s.mergeStrategy === 'none' ? t.worktree : undefined, waitingOn: undefined })!;
+    const est = t.plan?.estimate;
+    if (est && t.startedAt) this.store.calibrate(t.projectId, est, { costUsd: t.costUsd, minutes: (Date.now() - t.startedAt) / 60_000 });
     this.log(id, 'factory', 'status', '🎉 Shipped.');
     await this.sync(done, 'done', prUrl ? `Shipped via ${prUrl}` : 'Change approved by PM and shipped.');
   }
@@ -859,8 +957,19 @@ function arr(x: unknown): string[] {
 
 function normalizePlan(x: unknown, text: string): Plan {
   const o = (x ?? {}) as Record<string, unknown>;
-  return { summary: String(o.summary ?? text.slice(0, 400)), steps: arr(o.steps), risks: arr(o.risks), files: arr(o.files) };
+  const e = (o.estimate ?? undefined) as Record<string, unknown> | undefined;
+  const size = ['S', 'M', 'L', 'XL'].includes(String(e?.size)) ? (String(e!.size) as 'S' | 'M' | 'L' | 'XL') : undefined;
+  const cost = Number(e?.costUsd);
+  const minutes = Number(e?.minutes);
+  const estimate = size && cost > 0 && minutes > 0 ? { size, costUsd: +cost.toFixed(2), minutes: Math.round(minutes) } : undefined;
+  return { summary: String(o.summary ?? text.slice(0, 400)), steps: arr(o.steps), risks: arr(o.risks), files: arr(o.files), estimate };
 }
+
+function normPath(f: string) {
+  return f.trim().replace(/^\.?\//, '').replace(/\\/g, '/').toLowerCase();
+}
+
+const money = (n: number) => `$${n.toFixed(2)}`;
 
 function normalizeTest(x: unknown, text: string): TestReport {
   const o = (x ?? {}) as Record<string, unknown>;

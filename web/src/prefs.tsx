@@ -37,7 +37,7 @@ export interface Prefs {
 
 export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'reports' | 'rules' | 'trophies' | 'settings';
 
-export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed'];
+export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'done', 'failed'];
 
 const DEFAULTS: Prefs = {
   theme: 'system',
@@ -67,7 +67,7 @@ function load(): Prefs {
       office: { ...DEFAULTS.office, ...raw.office },
       game: { ...DEFAULTS.game, ...raw.game },
       // add columns introduced after the prefs were saved, in their natural place
-      columns: ALL_COLUMNS.filter((c) => (raw.columns ?? ALL_COLUMNS).includes(c) || !(raw.knownColumns ?? ALL_COLUMNS.filter((x) => x !== 'ci')).includes(c)),
+      columns: ALL_COLUMNS.filter((c) => (raw.columns ?? ALL_COLUMNS).includes(c) || !(raw.knownColumns ?? ALL_COLUMNS.filter((x) => x !== 'ci' && x !== 'manual')).includes(c)),
       knownColumns: ALL_COLUMNS,
     };
   } catch {

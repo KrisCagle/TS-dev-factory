@@ -24,6 +24,10 @@ export interface MockOptions {
   smokePasses?: (key: string) => boolean;
   /** Does this run of the Tester report a coverage drop? */
   coverageDrops?: (key: string) => boolean;
+  /** Files the Planner says it will touch. */
+  planFiles?: (key: string) => string[];
+  /** The Planner's cost forecast. */
+  estimateUsd?: (key: string) => number;
   /** Should the Tester leave this criterion unproven? */
   leavesUnproven?: (key: string, criterion: string) => boolean;
 }
@@ -94,7 +98,12 @@ export class MockRunner implements AgentRunner {
           summary: `Implement ${key} with a small, contained change and tests.`,
           steps: ['Locate the affected module', 'Add the new behavior behind a clear function', 'Wire it into the caller', 'Add unit tests', 'Update docs'],
           risks: ['Existing callers may depend on current behavior'],
-          files: [rand(FILES), rand(FILES)],
+          files: this.opts.planFiles ? this.opts.planFiles(key) : [`src/features/${key.toLowerCase()}.ts`, ...(random() < 0.3 ? [rand(FILES)] : [])],
+          estimate: (() => {
+            const size = rand(['S', 'S', 'M', 'M', 'L']);
+            const base = { S: 0.4, M: 0.8, L: 1.5, XL: 3 }[size as 'S'];
+            return { size, costUsd: +(this.opts.estimateUsd ? this.opts.estimateUsd(key) : base * (0.8 + random() * 0.4)).toFixed(2), minutes: Math.round({ S: 6, M: 14, L: 30, XL: 60 }[size as 'S'] * (0.8 + random() * 0.4)) };
+          })(),
         };
         onEvent('text', 'Plan ready: 5 steps, 1 risk flagged.');
         return { ...base, text: structured.summary, structured };
