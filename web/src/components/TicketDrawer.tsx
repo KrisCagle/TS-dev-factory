@@ -1,3 +1,4 @@
+import { QualityPanel, ShipPanel } from './Quality';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useFactory } from '../state';
@@ -116,6 +117,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
                 <textarea className="textarea" style={{ minHeight: 120 }} defaultValue={t.description} key={t.id + 'd'} onBlur={(e) => e.target.value !== t.description && save({ description: e.target.value })} />
               </label>
               {t.error && <div className="banner" style={{ margin: 0 }}>⚠ {t.error}</div>}
+              <ShipPanel t={t} />
               {(t.ci || t.prNumber) && (
                 <div>
                   <strong>🚦 CI {t.prNumber ? <>on {t.prUrl ? <a href={t.prUrl} target="_blank" rel="noreferrer">PR #{t.prNumber} ↗</a> : `PR #${t.prNumber}`}</> : ''}</strong>
@@ -164,6 +166,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
           {tab === 'files' && <FileViewer t={t} />}
           {tab === 'quality' && (
             <>
+              <QualityPanel t={t} open />
               {(t.artifacts?.length ?? 0) > 0 && (
                 <div>
                   <strong>📸 Screenshots</strong>

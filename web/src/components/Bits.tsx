@@ -1,3 +1,4 @@
+import { SafetyBadge } from './Quality';
 import { useFactory } from '../state';
 import { usePrefs } from '../prefs';
 import { compact, duration, money, PRIORITY_META, ROLE_META, SOURCE_META, ago } from '../meta';
@@ -61,6 +62,9 @@ export function TicketCard({ t, draggable, onDragStart, onDragEnd, dragging }: {
         {t.harvest?.timer && <span className="chip ci-pending" title="Harvest timer running">⏱</span>}
         {t.stage === 'failed' && <span className="badge" style={{ color: 'var(--bad)' }}>⚠ {t.error?.slice(0, 40)}</span>}
         {t.stage === 'done' && t.prUrl && <span className="chip">PR opened</span>}
+        {(t.stage === 'awaiting_approval' || t.stage === 'ci') && t.gate !== 'plan' && <SafetyBadge c={t.confidence} compact />}
+        {t.ship?.smoke?.state === 'failed' && !t.ship.reverted && <span className="chip" style={{ color: 'var(--bad)' }}>🧯 smoke failed</span>}
+        {t.ship?.reverted && <span className="chip" style={{ color: 'var(--warn)' }}>↩ reverted</span>}
         <span style={{ marginLeft: 'auto' }} />
         {f.cost && t.costUsd > 0 && <span title={`${compact(t.tokens)} tokens`}>{money(t.costUsd)}</span>}
         {f.age && <span>{ago(t.createdAt)}</span>}

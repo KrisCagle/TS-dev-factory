@@ -15,6 +15,7 @@ export const keys = {
   error: (t: Ticket) => `error:${t.id}`,
   stuck: (t: Ticket) => `stuck:${t.id}`,
   ciWait: (t: Ticket) => `ciwait:${t.id}`,
+  smoke: (t: Ticket) => `smoke:${t.id}`,
 };
 
 export function planGate(t: Ticket): NewItem {
@@ -65,7 +66,7 @@ export function signoff(t: Ticket, held?: string): NewItem {
     body: t.review?.summary,
     review: { summary: t.review?.summary ?? t.plan?.summary ?? t.title, setup: w.setup, cases: w.cases },
     brief: {
-      recommend: `Walk the ${w.cases.length} case${w.cases.length === 1 ? '' : 's'} and ship — ${tests}, ${reviewed}${ci}.`,
+      recommend: signoffAdvice(t, w.cases.length, `${tests}, ${reviewed}${ci}`),
       clearsWhen: 'Every case is approved (ships), or you send feedback (goes back to the Coder).',
       whyNow: 'The work is finished; nothing merges without your sign-off.',
       ifItWaits: 'The branch can drift from main and need a rebase; the agents move on to other tickets.',
@@ -76,6 +77,40 @@ export function signoff(t: Ticket, held?: string): NewItem {
     ],
     status: held ? 'held' : 'open',
     heldReason: held,
+  };
+}
+
+/** The sign-off recommendation, sharpened by the safety score and any criteria without proof. */
+function signoffAdvice(t: Ticket, cases: number, facts: string) {
+  const walk = `Walk the ${cases} case${cases === 1 ? '' : 's'}`;
+  const missing = (t.testReport?.criteria ?? []).filter((c) => c.status !== 'proven');
+  const c = t.confidence;
+  if (missing.length) return `${walk}, and check ${missing.length === 1 ? 'this criterion by hand — it has' : `these ${missing.length} criteria by hand — they have`} no test proving ${missing.length === 1 ? 'it' : 'them'}: ${missing.map((m) => `“${m.criterion}”`).join(', ')}.`;
+  if (c?.level === 'low') return `Look closely before shipping (safety ${c.score}/100): ${c.reasons.filter((r) => !r.ok).map((r) => r.text.toLowerCase()).join('; ')}.`;
+  if (c?.level === 'medium') return `${walk} and ship, but note: ${c.reasons.filter((r) => !r.ok).map((r) => r.text.toLowerCase()).join('; ')} (safety ${c.score}/100).`;
+  return `${walk} and ship — ${facts}.`;
+}
+
+/** The base branch's smoke test failed right after this ticket shipped. */
+export function smokeFailed(t: Ticket, output: string): NewItem {
+  const tail = output.trim().split('\n').slice(-12).join('\n');
+  return {
+    kind: 'decision',
+    ticketId: t.id,
+    key: keys.smoke(t),
+    title: `Smoke test failed after shipping ${t.key}`,
+    body: tail ? `\`\`\`\n${tail}\n\`\`\`` : undefined,
+    brief: {
+      recommend: 'Revert it now, then let the agents redo it with the failure as context.',
+      clearsWhen: 'You revert, ask for a fix-forward ticket, or keep it as is.',
+      whyNow: 'The smoke test passed before this change landed and fails right after it.',
+      ifItWaits: 'Everyone building on the base branch starts from something broken.',
+    },
+    options: [
+      { id: 'revert', label: 'Revert & redo', primary: true },
+      { id: 'fixforward', label: 'Keep it, open a fix ticket' },
+      { id: 'keep', label: 'Ignore — it’s a flaky test' },
+    ],
   };
 }
 

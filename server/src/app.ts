@@ -160,6 +160,11 @@ export function createFactory(opts: FactoryOptions) {
   }));
   app.post('/api/tickets/:id/cancel', wrap((req) => orch.cancel(req.params.id)));
   app.post('/api/tickets/:id/retry', wrap((req) => orch.retry(req.params.id)));
+  app.post('/api/tickets/:id/revert', wrap((req) => orch.revert(req.params.id, { redo: !!req.body?.redo, note: req.body?.note ? String(req.body.note) : undefined })));
+  app.post('/api/tickets/:id/smoke', wrap((req) => {
+    if (!store.ticket(req.params.id)?.ship) throw Object.assign(new Error('This ticket hasn’t shipped yet.'), { status: 409 });
+    void orch.smoke(req.params.id);
+  }));
   app.post('/api/tickets/:id/notes', wrap((req) => {
     if (!store.ticket(req.params.id)) throw Object.assign(new Error('not found'), { status: 404 });
     if (!String(req.body?.text ?? '').trim()) throw Object.assign(new Error('text is required'), { status: 400 });
@@ -249,13 +254,14 @@ export function createFactory(opts: FactoryOptions) {
 
   // ---------------------------------------------------------------- demo data
   app.post('/api/demo', wrap((req) => {
+    const ac = (...xs: string[]) => `\n\n## Acceptance criteria\n${xs.map((x) => `- [ ] ${x}`).join('\n')}`;
     const demo: Array<[string, Priority, string, string[]]> = [
-      ['Add dark mode toggle to settings page', 'high', 'Users want a dark theme. Persist choice per user and respect the OS preference by default.', ['frontend', 'ux']],
-      ['Rate-limit the public /search endpoint', 'urgent', 'We are getting scraped. 60 req/min per IP, return 429 with Retry-After.', ['backend', 'security']],
-      ['Fix date formatting on invoices', 'medium', 'Invoices show ISO timestamps. Use the account locale.', ['bug', 'billing']],
-      ['Add CSV export to the reports table', 'medium', 'Export the currently filtered rows. Include headers.', ['frontend']],
-      ['Upgrade logger and remove console.log calls', 'low', 'Replace stray console.log with the structured logger.', ['chore']],
-      ['Password reset emails expire too fast', 'high', 'Token TTL is 5 minutes; should be 60. Add a test.', ['bug', 'auth']],
+      ['Add dark mode toggle to settings page', 'high', `Users want a dark theme.${ac('A toggle on the settings page switches between light and dark', 'The choice is remembered per user', 'New users get their OS preference by default')}`, ['frontend', 'ux']],
+      ['Rate-limit the public /search endpoint', 'urgent', `We are getting scraped.${ac('More than 60 requests a minute from one IP get a 429', 'The 429 includes a Retry-After header', 'Signed-in users are not limited')}`, ['backend', 'security']],
+      ['Fix date formatting on invoices', 'medium', `Invoices show ISO timestamps.${ac('Invoice dates use the account locale', 'PDF and email invoices match')}`, ['bug', 'billing']],
+      ['Add CSV export to the reports table', 'medium', `Export the currently filtered rows.${ac('An Export CSV button downloads the filtered rows', 'The file has a header row', 'Commas and quotes in values are escaped')}`, ['frontend']],
+      ['Upgrade logger and remove console.log calls', 'low', `Replace stray console.log with the structured logger.${ac('No console.log calls remain in src/', 'Logs include the request ID')}`, ['chore']],
+      ['Password reset emails expire too fast', 'high', `Token TTL is 5 minutes; should be 60.${ac('Reset links work for 60 minutes', 'Expired links show a clear message with a way to resend')}`, ['bug', 'auth']],
     ];
     const projectId = req.body?.projectId as string | undefined;
     demo.forEach(([title, priority, description, labels], i) => store.createTicket({ title, priority, description, labels, projectId, stage: i < 4 ? 'ready' : 'backlog' }));

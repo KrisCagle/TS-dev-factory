@@ -42,8 +42,8 @@ export class Factory {
     await this.api.post('/api/factory/pause', { data: { paused: false } });
   }
 
-  async ticket(title: string, stage: 'ready' | 'backlog' = 'ready') {
-    return (await this.api.post('/api/tickets', { data: { title, stage } })).json();
+  async ticket(title: string, stage: 'ready' | 'backlog' = 'ready', description = '') {
+    return (await this.api.post('/api/tickets', { data: { title, stage, description } })).json();
   }
 
   async waitForStage(id: string, stage: string, timeout = 45_000) {

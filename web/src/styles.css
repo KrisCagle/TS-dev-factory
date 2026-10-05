@@ -353,3 +353,21 @@ pre.code { margin: 0; font: 12px/1.5 var(--mono); overflow: auto; max-height: 70
   .fview { grid-template-columns: 1fr; }
   .flist { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* ---------- quality: safety score, proof, ship panel */
+.safety { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; border-radius: 999px; padding: 1px 9px; color: var(--lvl); background: color-mix(in srgb, var(--lvl) 12%, transparent); border: 1px solid color-mix(in srgb, var(--lvl) 35%, transparent); white-space: nowrap; }
+.qpanel { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; background: var(--panel2); }
+.reasons { list-style: none; margin: 0; padding: 0; display: grid; gap: 3px; font-size: 12.5px; }
+.reasons li.ok { color: var(--muted); }
+.reasons li.bad { color: var(--text); }
+.reasons li.bad::first-letter { color: var(--warn); font-weight: 700; }
+.proof ul { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.proof li { display: flex; gap: 8px; align-items: baseline; }
+.proof .pmark { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; font-size: 11px; font-weight: 700; flex: none; }
+.proof li.proven .pmark { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.proof li.unproven .pmark { background: color-mix(in srgb, var(--warn) 20%, transparent); color: var(--warn); }
+.proof li.failed .pmark { background: color-mix(in srgb, var(--bad) 18%, transparent); color: var(--bad); }
+.shippanel { display: grid; gap: 8px; border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; }
+.chip.smoke-passed { color: var(--ok); }
+.chip.smoke-failed { color: var(--bad); }
+.btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }

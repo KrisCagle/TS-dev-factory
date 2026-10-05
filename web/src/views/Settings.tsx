@@ -108,6 +108,16 @@ export function Settings() {
             <div className="small muted" style={{ alignSelf: 'end' }}>Live mode uses it for projects whose “When you approve” is <em>open a GitHub PR</em>, with GitHub connected. Simulated mode fakes CI so you can try it.</div>
           </div>
         )}
+        <div className="row"><Toggle on={s.quality.coverage.enabled} onChange={(v) => setS({ ...s, quality: { ...s.quality, coverage: { ...s.quality.coverage, enabled: v } } })} /> <span><strong>Coverage gate</strong> — send the change back when test coverage drops (projects that can measure it)</span></div>
+        {s.quality.coverage.enabled && (
+          <div className="grid2">
+            <label className="field">Allowed drop (percentage points)
+              <input className="input" type="number" min={0} step={0.1} value={s.quality.coverage.maxDropPct} onChange={(e) => setS({ ...s, quality: { ...s.quality, coverage: { ...s.quality.coverage, maxDropPct: Number(e.target.value) } } })} />
+            </label>
+          </div>
+        )}
+        <div className="row"><Toggle on={s.quality.requireProof} onChange={(v) => setS({ ...s, quality: { ...s.quality, requireProof: v } })} /> <span><strong>Require proof</strong> — send the change back if any acceptance criterion has no test proving it (off: it's flagged in your review instead)</span></div>
+        <div className="row"><Toggle on={s.quality.smoke} onChange={(v) => setS({ ...s, quality: { ...s.quality, smoke: v } })} /> <span><strong>Smoke test after shipping</strong> — run each project's smoke command on the base branch, and offer a one-click revert if it fails</span></div>
         <div className="row"><Toggle on={s.watchdog.enabled} onChange={(v) => setS({ ...s, watchdog: { ...s.watchdog, enabled: v } })} /> <span><strong>Watchdog</strong> — restart an agent that goes quiet with a nudge, and only bring it to you if that doesn't work</span></div>
         {s.watchdog.enabled && (
           <div className="grid2">

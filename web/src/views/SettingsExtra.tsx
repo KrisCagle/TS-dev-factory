@@ -94,6 +94,12 @@ export function ProjectsSettings({ s, setS }: { s: S; setS: (s: S) => void }) {
                   <label className="field">Open preview at path
                     <input className="input mono" placeholder="/" value={p.previewPath ?? ''} onChange={(e) => upd(p.id, { previewPath: e.target.value })} />
                   </label>
+                  <label className="field">Smoke command (after shipping)
+                    <input className="input mono" placeholder="npm test" value={p.smokeCommand ?? ''} onChange={(e) => upd(p.id, { smokeCommand: e.target.value || undefined })} />
+                  </label>
+                  <label className="field">Sensitive paths (lower the safety score)
+                    <input className="input mono" placeholder="migrations/, auth, payment, .env" value={(p.riskyPaths ?? []).join(', ')} onChange={(e) => upd(p.id, { riskyPaths: e.target.value.split(',').map((x) => x.trim()).filter(Boolean) })} />
+                  </label>
                   {harvestOn && (
                     <>
                       <label className="field">Harvest project

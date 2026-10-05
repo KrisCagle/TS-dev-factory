@@ -30,6 +30,9 @@ export function makeFactory(opts: { mock?: MockOptions; settings?: Partial<Setti
       reviewRequestsChanges: () => false,
       hangs: () => false,
       ciPasses: () => true,
+      smokePasses: () => true,
+      coverageDrops: () => false,
+      leavesUnproven: () => false,
       ...opts.mock,
     },
   });
