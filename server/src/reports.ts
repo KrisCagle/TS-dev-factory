@@ -91,8 +91,10 @@ _Agent spend: $${spendUsd.toFixed(2)}${harvestHours !== undefined ? ` · Hours l
   }
 
   /** Weekday morning standup to Slack, if switched on. */
+  private timer?: NodeJS.Timeout;
+
   startSchedule() {
-    setInterval(() => {
+    this.timer = setInterval(() => {
       const s = this.store.settings();
       if (!s.reports.dailySlack || !s.notifications.slack.webhookUrl) return;
       const now = new Date();
@@ -103,5 +105,9 @@ _Agent spend: $${spendUsd.toFixed(2)}${harvestHours !== undefined ? ` · Hours l
       this.store.updateSettings({ reports: { ...s.reports, lastSent: today } });
       void this.postToSlack('day').catch((e) => console.error('[reports] daily standup:', e.message));
     }, 60_000);
+  }
+
+  stopSchedule() {
+    if (this.timer) clearInterval(this.timer);
   }
 }

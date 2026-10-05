@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { ClaudeRunner, type AgentRunner, type RunResult } from './agents/runner.js';
-import { MockRunner, mockDiff } from './agents/mock.js';
+import { MockRunner, mockDiff, type MockOptions } from './agents/mock.js';
 import * as A from './attention.js';
 import { connectorFor, github } from './connectors/index.js';
 import * as g from './git.js';
@@ -34,6 +34,16 @@ interface Activity {
   stalled: boolean;
 }
 
+export interface OrchestratorOptions {
+  /** Simulated-agent knobs (speed, seeded randomness, forced outcomes). */
+  mock?: MockOptions;
+  /**
+   * Scales the factory's own timers in simulated mode (scheduler, CI polling, watchdog).
+   * Defaults to the mock speed, so a fast test run is fast end to end.
+   */
+  speed?: number;
+}
+
 export interface ResolveInput {
   option?: string;
   text?: string;
@@ -47,7 +57,10 @@ export class Orchestrator {
   private ciPolled = new Map<string, number>();
   private mockCiPolls = new Map<string, number>();
   private claude = new ClaudeRunner();
-  private mock = new MockRunner();
+  private mock: MockRunner;
+  private speed: number;
+  private random: () => number;
+  private mockOpts: MockOptions;
   private timers: NodeJS.Timeout[] = [];
   paused = false;
   private shuttingDown = false;
@@ -55,7 +68,11 @@ export class Orchestrator {
   /** Extension points used by other services (previews, artifacts). */
   hooks: { rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
 
-  constructor(private store: Store, private harvest: HarvestService) {
+  constructor(private store: Store, private harvest: HarvestService, opts: OrchestratorOptions = {}) {
+    this.mock = new MockRunner(opts.mock);
+    this.mockOpts = opts.mock ?? {};
+    this.speed = opts.speed ?? opts.mock?.speed ?? 1;
+    this.random = opts.mock?.random ?? Math.random;
     // Anything mid-flight when the server stopped goes back in the queue.
     for (const t of store.tickets()) {
       if (ACTIVE.includes(t.stage)) {
@@ -66,9 +83,10 @@ export class Orchestrator {
   }
 
   start() {
-    this.timers.push(setInterval(() => this.tick(), 1500));
-    this.timers.push(setInterval(() => void this.ciTick(), 3000));
-    this.timers.push(setInterval(() => this.watchdogTick(), 5000));
+    const ms = (n: number) => Math.max(20, Math.round(n * this.speed));
+    this.timers.push(setInterval(() => this.tick(), ms(1500)));
+    this.timers.push(setInterval(() => void this.ciTick(), ms(3000)));
+    this.timers.push(setInterval(() => this.watchdogTick(), ms(5000)));
     this.reconcile();
   }
 
@@ -128,7 +146,8 @@ export class Orchestrator {
   // ------------------------------------------------------------------ PM actions
   approve(id: string, note?: string) {
     const t = this.store.ticket(id);
-    if (!t || t.stage !== 'awaiting_approval') throw new Error('Ticket is not waiting for approval');
+    if (!t) throw Object.assign(new Error('Ticket not found'), { status: 404 });
+    if (t.stage !== 'awaiting_approval') throw Object.assign(new Error('Ticket is not waiting for approval'), { status: 409 });
     if (note) this.addNote(id, note);
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
@@ -139,7 +158,8 @@ export class Orchestrator {
 
   reject(id: string, feedback: string) {
     const t = this.store.ticket(id);
-    if (!t || t.stage !== 'awaiting_approval') throw new Error('Ticket is not waiting for approval');
+    if (!t) throw Object.assign(new Error('Ticket not found'), { status: 404 });
+    if (t.stage !== 'awaiting_approval') throw Object.assign(new Error('Ticket is not waiting for approval'), { status: 409 });
     this.addNote(id, feedback);
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
@@ -443,7 +463,7 @@ export class Orchestrator {
   private stallMs() {
     const s = this.store.settings();
     // Simulated agents emit every few seconds, so a short fuse keeps the demo lively.
-    return s.mode === 'mock' ? 20_000 : Math.max(1, s.watchdog.stallMinutes) * 60_000;
+    return s.mode === 'mock' ? 20_000 * this.speed : Math.max(1, s.watchdog.stallMinutes) * 60_000;
   }
 
   private watchdogTick() {
@@ -488,7 +508,7 @@ export class Orchestrator {
     const t = this.store.ticket(id)!;
     const s = this.ps(t);
     if (s.mode === 'mock') {
-      if (!t.prNumber) this.store.updateTicket(id, { prNumber: 100 + Math.floor(Math.random() * 900) });
+      if (!t.prNumber) this.store.updateTicket(id, { prNumber: 100 + Math.floor(this.random() * 900) });
       return;
     }
     if (!t.branch || !t.worktree) throw new Error('No branch to open a pull request from.');
@@ -508,7 +528,7 @@ export class Orchestrator {
 
   private async ciTick() {
     const s = this.store.settings();
-    const interval = s.mode === 'mock' ? 4000 : Math.max(10, s.ciGate.pollSeconds) * 1000;
+    const interval = s.mode === 'mock' ? 4000 * this.speed : Math.max(10, s.ciGate.pollSeconds) * 1000;
     for (const t of this.store.tickets().filter((x) => x.stage === 'ci')) {
       if (Date.now() - (this.ciPolled.get(t.id) ?? 0) < interval) continue;
       this.ciPolled.set(t.id, Date.now());
@@ -549,7 +569,7 @@ export class Orchestrator {
     const names = ['build', 'lint', 'unit tests'];
     if (n < 3) return { sha: 'mock', state: 'pending', checks: names.map((name, i) => ({ name, state: i < n ? 'success' : 'pending' })) };
     // First run on a ticket fails a quarter of the time, so you can see red CI loop back.
-    const fail = t.iterations === 0 && ((t.key.charCodeAt(t.key.length - 1) + (t.prNumber ?? 0)) % 4 === 0);
+    const fail = t.iterations === 0 && (this.mockOpts.ciPasses ? !this.mockOpts.ciPasses(t.key) : (t.key.charCodeAt(t.key.length - 1) + (t.prNumber ?? 0)) % 4 === 0);
     const checks: CiCheck[] = names.map((name) => ({ name, state: fail && name === 'unit tests' ? 'failure' : 'success' }));
     return { sha: 'mock', state: fail ? 'failure' : 'success', checks };
   }

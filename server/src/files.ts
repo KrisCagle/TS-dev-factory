@@ -48,10 +48,17 @@ export class FileBrowser {
   read(id: string, rel: string) {
     const t = this.ticket(id);
     if (!t.worktree || !fs.existsSync(t.worktree)) return { path: rel, content: fromDiff(t.diff ?? '', rel), fromDiff: true };
-    const root = path.resolve(t.worktree);
-    const full = path.resolve(root, rel);
-    if (!full.startsWith(root + path.sep)) throw Object.assign(new Error('Path outside the worktree'), { status: 400 });
+    const outside = () => Object.assign(new Error('Path outside the worktree'), { status: 400 });
+    const root = fs.realpathSync(path.resolve(t.worktree));
+    const asked = path.resolve(root, rel);
+    if (!asked.startsWith(root + path.sep)) throw outside();
+    if (!fs.existsSync(asked)) throw Object.assign(new Error('File not found'), { status: 404 });
+    // follow symlinks too, so a link inside the worktree can't point outside it
+    const full = fs.realpathSync(asked);
+    if (!full.startsWith(root + path.sep)) throw outside();
+    if (path.relative(root, full).split(path.sep)[0] === '.git') throw outside();
     const st = fs.statSync(full);
+    if (!st.isFile()) throw Object.assign(new Error('Not a file'), { status: 400 });
     if (st.size > MAX_BYTES) return { path: rel, content: `(${Math.round(st.size / 1024)} KB — too large to show here; open it in your editor)`, tooLarge: true };
     const buf = fs.readFileSync(full);
     if (buf.includes(0)) return { path: rel, content: '(binary file)', binary: true };

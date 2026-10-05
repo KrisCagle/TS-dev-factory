@@ -21,9 +21,14 @@
     "dev": "concurrently -k -n server,web -c blue,magenta \"npm:dev -w server\" \"npm:dev -w web\"",
     "build": "npm run build -w web && npm run build -w server",
     "start": "npm run start -w server",
-    "typecheck": "npm run typecheck -w server && npm run typecheck -w web"
+    "typecheck": "npm run typecheck -w server && npm run typecheck -w web && tsc -p e2e/tsconfig.json",
+    "test": "npm test -w server",
+    "test:watch": "npm run test:watch -w server",
+    "test:e2e": "npm run build && playwright test",
+    "test:all": "npm run typecheck && npm test && npm run test:e2e"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "concurrently": "^9.1.0"
   },
   "allowScripts": {

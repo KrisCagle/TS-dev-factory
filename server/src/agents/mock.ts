@@ -6,8 +6,33 @@ const sleep = (ms: number, signal: AbortSignal) =>
     signal.addEventListener('abort', () => { clearTimeout(t); reject(new Error('aborted')); }, { once: true });
   });
 
-const rand = <T,>(xs: T[]) => xs[Math.floor(Math.random() * xs.length)];
 const FILES = ['src/api/routes.ts', 'src/components/Header.tsx', 'src/lib/auth.ts', 'src/utils/format.ts', 'src/db/schema.ts', 'README.md'];
+
+/** Knobs for tests and demos. Everything defaults to the lively demo behaviour. */
+export interface MockOptions {
+  /** Multiplies every simulated delay: 1 = demo pace (~1 min per ticket), 0.01 = near-instant. */
+  speed?: number;
+  /** Source of randomness; pass a seeded generator for reproducible runs. */
+  random?: () => number;
+  /** Force outcomes instead of rolling dice. */
+  testsPass?: (key: string) => boolean;
+  reviewRequestsChanges?: (key: string, firstReview: boolean) => boolean;
+  hangs?: (key: string, role: string) => boolean;
+  /** Simulated CI result for a ticket's first run (later runs always pass). */
+  ciPasses?: (key: string) => boolean;
+}
+
+/** Small deterministic PRNG (mulberry32) for reproducible simulated runs. */
+export function seeded(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
 
 /**
  * Simulated agents — lets you try the whole factory (board, office, gates, loops)
@@ -15,14 +40,28 @@ const FILES = ['src/api/routes.ts', 'src/components/Header.tsx', 'src/lib/auth.t
  */
 export class MockRunner implements AgentRunner {
   private reviewedOnce = new Set<string>();
+  private random: () => number;
+  private speed: number;
+
+  constructor(private opts: MockOptions = {}) {
+    this.random = opts.random ?? Math.random;
+    this.speed = opts.speed ?? 1;
+  }
+
+  private rand<T>(xs: T[]) {
+    return xs[Math.floor(this.random() * xs.length)];
+  }
 
   async run({ agent, prompt, signal, onEvent }: RunOptions): Promise<RunResult> {
-    const key = prompt.match(/Ticket ([A-Z]+-\d+)/)?.[1] ?? 'X';
-    const steps = 3 + Math.floor(Math.random() * 4);
-    const tools = agent.allowedTools;
+    const rand = <T,>(xs: T[]) => this.rand(xs);
+    const random = this.random;
+    const wait = (ms: number) => sleep(ms * this.speed, signal);
+    const key = prompt.match(/Ticket ([A-Z0-9]+-\d+)/)?.[1] ?? 'X';
+    const steps = 3 + Math.floor(random() * 4);
+    const tools = agent.allowedTools.length ? agent.allowedTools : ['Read'];
     const nudged = prompt.startsWith('⏰');
     // Now and then an agent "hangs" so you can watch the watchdog catch it.
-    const willHang = !nudged && Math.random() < 0.07;
+    const willHang = !nudged && (this.opts.hangs ? this.opts.hangs(key, agent.role) : random() < 0.07);
     onEvent('text', rand([
       `Looking at ${key}. Let me get oriented in the codebase first.`,
       `Picking up ${key}.`,
@@ -34,14 +73,14 @@ export class MockRunner implements AgentRunner {
         onEvent('text', 'Waiting on a long-running command…');
         await sleep(10 * 60_000, signal); // until the watchdog aborts this attempt
       }
-      await sleep(1200 + Math.random() * 1800, signal);
+      await wait(1200 + random() * 1800);
       const tool = rand(tools);
       const arg = tool === 'Bash' ? rand(['npm test', 'npm run lint', 'git diff --stat', 'npm run build']) : tool === 'Grep' || tool === 'Glob' ? rand(['useAuth', '**/*.test.ts', 'TODO', 'export function']) : rand(FILES);
       onEvent('tool', `${tool} ${arg}`);
     }
-    await sleep(800, signal);
+    await wait(800);
 
-    const base = { costUsd: +(0.02 + Math.random() * 0.12).toFixed(4), tokens: 4000 + Math.floor(Math.random() * 20000) };
+    const base = { costUsd: +(0.02 + random() * 0.12).toFixed(4), tokens: 4000 + Math.floor(random() * 20000) };
 
     switch (agent.role) {
       case 'planner': {
@@ -58,7 +97,7 @@ export class MockRunner implements AgentRunner {
         onEvent('text', 'Implemented the change and updated the affected call sites. Build passes locally.');
         return { ...base, text: 'Implemented the change.' };
       case 'tester': {
-        const passed = Math.random() > 0.2;
+        const passed = this.opts.testsPass ? this.opts.testsPass(key) : random() > 0.2;
         const structured = passed
           ? { passed, summary: 'All 42 tests pass, added 3 new tests.', failures: [] }
           : { passed, summary: '1 test failing.', failures: ['format.test.ts › handles empty input — expected "" but got undefined'] };
@@ -68,7 +107,7 @@ export class MockRunner implements AgentRunner {
       case 'reviewer': {
         const first = !this.reviewedOnce.has(key);
         this.reviewedOnce.add(key);
-        const requestChanges = first && Math.random() < 0.45;
+        const requestChanges = this.opts.reviewRequestsChanges ? this.opts.reviewRequestsChanges(key, first) : first && random() < 0.45;
         const structured = requestChanges
           ? { verdict: 'request_changes', summary: 'Solid approach, one real issue to fix.', comments: [{ file: rand(FILES), line: 42, severity: 'major', comment: 'Missing null check — this throws when the user is signed out.' }, { file: rand(FILES), severity: 'nit', comment: 'Consider a more descriptive name.' }] }
           : {
