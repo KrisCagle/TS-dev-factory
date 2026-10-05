@@ -16,6 +16,8 @@ import { HarvestPill } from './components/HarvestPill';
 import { Settings } from './views/Settings';
 import { Reports } from './views/Reports';
 import { Rules } from './views/Rules';
+import { Trophies } from './views/Trophies';
+import { Celebrations, GamePill } from './components/Game';
 
 const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
   { v: 'inbox', icon: '✋', label: 'Needs you', key: 'i' },
@@ -24,6 +26,7 @@ const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
   { v: 'reports', icon: '📊', label: 'Reports', key: 'r' },
   { v: 'agents', icon: '🤖', label: 'Agents', key: 'a' },
   { v: 'rules', icon: '📐', label: 'House rules', key: 'h' },
+  { v: 'trophies', icon: '🏆', label: 'Trophy room', key: 't' },
   { v: 'activity', icon: '📜', label: 'Activity', key: 'l' },
   { v: 'settings', icon: '⚙️', label: 'Settings', key: 's' },
 ];
@@ -135,6 +138,7 @@ export function App() {
             {view === 'board' && <input ref={search} className="input" style={{ maxWidth: 260 }} placeholder="Filter tickets…  /" value={filter} onChange={(e) => setFilter(e.target.value)} />}
             <span className="grow" />
             <ProjectSwitcher />
+            <GamePill />
             <HarvestPill />
             {awaiting > 0 && view !== 'inbox' && <button className="btn" onClick={() => go('inbox')}>✋ {awaiting} waiting on you</button>}
             <button className="btn" onClick={() => api.pause(!f.factory.paused)}>{f.factory.paused ? '▶ Resume' : '⏸ Pause'}</button>
@@ -152,6 +156,7 @@ export function App() {
                 {view === 'board' && <Board filter={filter} />}
                 {view === 'reports' && <Reports />}
                 {view === 'rules' && <Rules />}
+                {view === 'trophies' && <Trophies />}
                 {view === 'agents' && <Agents />}
                 {view === 'activity' && <Activity />}
                 {view === 'settings' && <Settings />}
@@ -165,6 +170,7 @@ export function App() {
       {creating && <NewTicket stage={creating} onClose={() => setCreating(null)} />}
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
       {toast && <div className="toast">{toast}</div>}
+      <Celebrations />
     </UICtx.Provider>
   );
 }

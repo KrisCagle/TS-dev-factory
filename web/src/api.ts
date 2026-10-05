@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
+import type { GameView, AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -57,6 +57,7 @@ export interface Report {
   blocked: Array<{ key: string; title: string; why: string }>;
   spendUsd: number;
   harvestHours?: number;
+  highlight?: { key: string; title: string; why: string };
   markdown: string;
 }
 
@@ -69,6 +70,7 @@ export interface ServerState {
   stats: Stats;
   connectors: Array<{ source: TicketSource; label: string; enabled: boolean }>;
   hasApiKey: boolean;
+  game: GameView;
 }
 
 export const api = {
@@ -84,6 +86,7 @@ export const api = {
   retry: (id: string) => req('POST', `/api/tickets/${id}/retry`),
   revert: (id: string, opts: { redo?: boolean; note?: string } = {}) => req<{ redo?: Ticket }>('POST', `/api/tickets/${id}/revert`, opts),
   smoke: (id: string) => req('POST', `/api/tickets/${id}/smoke`),
+  game: () => req<GameView>('GET', '/api/game'),
   note: (id: string, text: string) => req('POST', `/api/tickets/${id}/notes`, { text }),
   updateAgent: (role: AgentRole, a: Partial<AgentConfig>) => req<AgentConfig>('PATCH', `/api/agents/${role}`, a),
   resetAgent: (role: AgentRole) => req<AgentConfig>('POST', `/api/agents/${role}/reset`),

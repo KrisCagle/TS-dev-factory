@@ -76,6 +76,7 @@ export class Store extends EventEmitter {
         },
         logs: raw.logs ?? [],
         attention: raw.attention ?? [],
+        game: raw.game,
       };
     } catch (err) {
       // Never silently overwrite a file we couldn't read: keep a copy next to it first.
@@ -258,6 +259,16 @@ export class Store extends EventEmitter {
       this.scheduleSave();
       this.emit('attention', this.db.attention);
     }
+  }
+
+  // ---------- gamification ----------
+  game() {
+    return this.db.game;
+  }
+
+  setGame(g: NonNullable<DB['game']>) {
+    this.db.game = g;
+    this.scheduleSave();
   }
 
   // ---------- agents ----------

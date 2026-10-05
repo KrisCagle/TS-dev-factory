@@ -72,6 +72,12 @@ export function Reports() {
             <Stat n={`$${r.spendUsd.toFixed(2)}`} label="agent spend" />
             {r.harvestHours !== undefined && <Stat n={`${r.harvestHours}h`} label="logged in Harvest" />}
           </div>
+          {r.highlight && (
+            <div className="card" style={{ padding: '12px 16px' }}>
+              ⭐ <strong>Highlight of the week:</strong> <button className="linkish mono" onClick={() => open(r.highlight!.key)}>{r.highlight.key}</button> {r.highlight.title}
+              {r.highlight.why && <span className="muted small"> — {r.highlight.why}</span>}
+            </div>
+          )}
           <div className="rgrid">
             <Section title="🚀 Shipped" empty="Nothing shipped yet" items={r.shipped.map((t) => ({ key: t.key, text: t.title, link: t.prUrl }))} onOpen={open} />
             <Section title="⚙️ In progress" empty="Nothing in flight" items={r.inProgress.map((t) => ({ key: t.key, text: t.title, sub: t.stage }))} onOpen={open} />

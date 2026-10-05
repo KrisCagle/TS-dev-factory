@@ -14,6 +14,7 @@ import { Previews } from './previews.js';
 import { Reports, type Range } from './reports.js';
 import { Rules } from './rules.js';
 import { Scoper } from './scoper.js';
+import { Game } from './game.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
@@ -57,6 +58,7 @@ export function createFactory(opts: FactoryOptions) {
   let broadcastLate: (msg: unknown) => void = () => undefined;
   const notifier = new Notifier(store, (m) => broadcastLate(m));
   const reports = new Reports(store, notifier);
+  const game = new Game(store, (event) => broadcastLate({ type: 'celebrate', event }));
   orch.hooks = {
     rulesFor: (projectId) => rules.forPrompt(projectId),
     onFinished: (ticketId) => previews.stop(ticketId),
@@ -105,6 +107,7 @@ export function createFactory(opts: FactoryOptions) {
     stats: stats(),
     connectors: CONNECTORS.map((c) => ({ source: c.source, label: c.label, enabled: c.isEnabled(store.settings()) })),
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+    game: game.view(),
   })));
 
   app.get('/api/logs', wrap((req) => store.logs(undefined, Number(req.query.limit ?? 300))));
@@ -174,7 +177,11 @@ export function createFactory(opts: FactoryOptions) {
 
   // ---------------------------------------------------------------- projects: house rules
   app.get('/api/projects/:id/rules', wrap((req) => ({ ...rules.get(req.params.id), suggestions: rules.suggestions(req.params.id) })));
-  app.put('/api/projects/:id/rules', wrap((req) => rules.set(req.params.id, String(req.body?.text ?? ''))));
+  app.put('/api/projects/:id/rules', wrap((req) => {
+    const r = rules.set(req.params.id, String(req.body?.text ?? ''));
+    if (r.text.trim()) store.emit('game:event', { type: 'rules' });
+    return r;
+  }));
 
   // ---------------------------------------------------------------- previews, files, artifacts
   app.post('/api/tickets/:id/preview/start', wrap((req) => previews.start(req.params.id)));
@@ -192,7 +199,12 @@ export function createFactory(opts: FactoryOptions) {
   });
 
   // ---------------------------------------------------------------- ticket writer
-  app.post('/api/scope', wrap((req) => scoper.draft(req.body ?? {})));
+  app.post('/api/scope', wrap(async (req) => {
+    const d = await scoper.draft(req.body ?? {});
+    if (!req.body?.answers?.length) store.emit('game:event', { type: 'scoped' });
+    return d;
+  }));
+  app.get('/api/game', wrap(() => game.view()));
 
   // ---------------------------------------------------------------- notifications & reports
   app.post('/api/notifications/test', wrap(() => {
@@ -298,6 +310,7 @@ export function createFactory(opts: FactoryOptions) {
   store.on('settings', (settings) => broadcast({ type: 'settings', settings }));
   store.on('factory', (factory) => broadcast({ type: 'factory', factory }));
   store.on('attention', (attention) => { broadcast({ type: 'attention', attention }); pushStats(); });
+  store.on('game', (g) => broadcast({ type: 'game', game: g }));
 
   let started = false;
   return {
@@ -305,6 +318,7 @@ export function createFactory(opts: FactoryOptions) {
     server,
     store,
     orch,
+    game,
     /** Start listening and start the agents' scheduler. Resolves with the bound port. */
     listen(port: number) {
       return new Promise<number>((resolve) => {

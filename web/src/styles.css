@@ -371,3 +371,56 @@ pre.code { margin: 0; font: 12px/1.5 var(--mono); overflow: auto; max-height: 70
 .chip.smoke-passed { color: var(--ok); }
 .chip.smoke-failed { color: var(--bad); }
 .btn.danger { color: var(--bad); border-color: color-mix(in srgb, var(--bad) 40%, var(--border)); }
+
+/* ---------- gamification */
+.gpill-wrap { position: relative; }
+.gpill { display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font: inherit; font-size: 13px; cursor: pointer; }
+.gpill .lvl { font-weight: 700; color: var(--accent); }
+.xpbar { display: inline-block; width: 56px; height: 6px; border-radius: 999px; background: var(--bg2); overflow: hidden; vertical-align: middle; }
+.xpbar > span { display: block; height: 100%; background: linear-gradient(90deg, var(--accent), color-mix(in srgb, var(--accent) 60%, #f59e0b)); border-radius: inherit; transition: width .6s ease; }
+.xpbar.big { width: 100%; height: 10px; margin-top: 6px; }
+.gpop { position: absolute; right: 0; top: 40px; width: 320px; z-index: 40; padding: 14px; display: grid; gap: 10px; }
+.quests { display: grid; gap: 6px; }
+.quest { display: flex; align-items: center; gap: 8px; font-size: 13px; padding: 6px 8px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); }
+.quest.done { opacity: .65; }
+.quest.done .grow { text-decoration: line-through; }
+.quest .qicon { width: 20px; text-align: center; }
+.quest.done .qicon { color: var(--ok); font-weight: 700; }
+
+.trophies { max-width: 1100px; padding: 18px; display: grid; gap: 16px; }
+.trophies .card { padding: 18px; display: grid; gap: 12px; align-content: start; }
+.trophies h2 { margin: 0; font-size: 15px; }
+.levelcard .row { gap: 18px; }
+.lvlbadge { width: 64px; height: 64px; border-radius: 16px; display: grid; place-items: center; font-size: 28px; font-weight: 800; color: white; background: linear-gradient(135deg, var(--accent), color-mix(in srgb, var(--accent) 50%, #f59e0b)); box-shadow: var(--shadow); }
+.lstat { display: grid; text-align: center; min-width: 90px; }
+.lstat b { font-size: 18px; }
+.lstat span { font-size: 11.5px; color: var(--muted); }
+.tgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px; }
+.achgrid, .unlocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 10px; }
+.ach, .unlock { display: flex; gap: 10px; align-items: flex-start; padding: 10px; border-radius: 10px; border: 1px dashed var(--border); opacity: .55; filter: grayscale(1); }
+.ach.on, .unlock.on { opacity: 1; filter: none; border-style: solid; background: color-mix(in srgb, var(--accent) 6%, var(--panel)); }
+.aicon { font-size: 22px; line-height: 1; }
+.cardgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
+.tcard-agent { border: 1px solid var(--border); border-top: 4px solid var(--ag); border-radius: 12px; padding: 12px; display: grid; gap: 10px; background: var(--panel); }
+.tcard-agent .avatar { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: white; font-size: 16px; }
+.stats3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px; text-align: center; }
+.stats3 b { display: block; font-size: 17px; }
+.stats3 span { font-size: 10.5px; color: var(--muted); line-height: 1.2; display: block; }
+.char-pop .tcard-agent { padding: 8px; }
+.xplog { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
+.xplog .pos { color: var(--ok); font-weight: 700; }
+.xplog .neg { color: var(--bad); font-weight: 700; }
+.highlight { font-size: 14px; }
+
+.celebrations { position: fixed; right: 18px; bottom: 18px; display: grid; gap: 8px; z-index: 80; pointer-events: none; }
+.celebrate { display: flex; gap: 10px; align-items: center; min-width: 260px; max-width: 360px; padding: 12px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--border); box-shadow: 0 10px 30px rgb(0 0 0 / .18); animation: pop-in .35s cubic-bezier(.2,1.4,.4,1); }
+.celebrate .cicon { font-size: 26px; }
+.celebrate.achievement { border-color: #f59e0b; background: color-mix(in srgb, #f59e0b 10%, var(--panel)); }
+.celebrate.levelup { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, var(--panel)); }
+@keyframes pop-in { from { transform: translateY(16px) scale(.92); opacity: 0; } to { transform: none; opacity: 1; } }
+.launch { position: fixed; inset: 0; pointer-events: none; z-index: 79; overflow: hidden; }
+.launch .rocket { position: absolute; left: 50%; bottom: -60px; font-size: 54px; animation: launch 1.6s cubic-bezier(.5,0,.8,.4) forwards; }
+@keyframes launch { 0% { transform: translate(-50%, 0) rotate(-45deg); } 100% { transform: translate(-50%, -115vh) rotate(-45deg); } }
+.launch i { position: absolute; top: -12px; width: 8px; height: 4px; border-radius: 1px; animation: confetti 2.2s ease-in forwards; }
+@keyframes confetti { to { transform: translate(var(--dx), 105vh) rotate(720deg); opacity: .4; } }
+@media (prefers-reduced-motion: reduce) { .celebrate { animation: none; } }

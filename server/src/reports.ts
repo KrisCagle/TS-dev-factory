@@ -15,6 +15,8 @@ export interface Report {
   inProgress: Array<{ key: string; title: string; stage: string }>;
   blocked: Array<{ key: string; title: string; why: string }>;
   spendUsd: number;
+  /** The week's best ship: safest, fully proven, no rework. */
+  highlight?: { key: string; title: string; why: string };
   harvestHours?: number;
   markdown: string;
 }
@@ -64,10 +66,17 @@ export class Reports {
 
     const project = projectId ? this.store.project(projectId).name : 'All projects';
     const title = range === 'day' ? `Standup — ${end.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}` : `Week of ${start.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })} – ${end.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`;
+    const best = shipped
+      .filter((t) => !t.ship?.reverted)
+      .map((t) => ({ t, score: (t.confidence?.score ?? 60) + (t.iterations === 0 ? 10 : 0) + ((t.testReport?.criteria ?? []).length && t.testReport!.criteria!.every((c) => c.status === 'proven') ? 5 : 0) }))
+      .sort((a, b) => b.score - a.score)[0]?.t;
+    const highlight = range === 'week' && best
+      ? { key: best.key, title: best.title, why: [best.confidence ? `safety ${best.confidence.score}` : '', best.iterations === 0 ? 'no rework' : '', best.testReport?.criteria?.every((c) => c.status === 'proven') ? 'every criterion proven' : ''].filter(Boolean).join(', ') }
+      : undefined;
     const list = <T,>(xs: T[], f: (x: T) => string, empty: string) => (xs.length ? xs.map((x) => `- ${f(x)}`).join('\n') : `- ${empty}`);
     const markdown = `### ${title} · ${project}
 
-**${range === 'day' ? 'Shipped since last working day' : 'Shipped this week'}** (${shipped.length})
+${highlight ? `⭐ **Highlight of the week:** ${highlight.key} ${highlight.title}${highlight.why ? ` (${highlight.why})` : ''}\n\n` : ''}**${range === 'day' ? 'Shipped since last working day' : 'Shipped this week'}** (${shipped.length})
 ${list(shipped, (t) => `${t.key} ${t.title}${t.prUrl ? ` (${t.prUrl})` : ''}`, 'Nothing shipped')}
 
 **In progress** (${inProgress.length})
@@ -81,7 +90,7 @@ ${list(blocked, (t) => `${t.key} ${t.title} — ${t.why}`, 'Nothing blocked')}
 
 _Agent spend: $${spendUsd.toFixed(2)}${harvestHours !== undefined ? ` · Hours logged in Harvest: ${harvestHours}` : ''}_`;
 
-    return { range, from: isoDay(start), to: isoDay(end), project, shipped: shipped.map((t) => ({ key: t.key, title: t.title, prUrl: t.prUrl })), needsYou, inProgress, blocked, spendUsd, harvestHours, markdown };
+    return { range, from: isoDay(start), to: isoDay(end), project, shipped: shipped.map((t) => ({ key: t.key, title: t.title, prUrl: t.prUrl })), needsYou, inProgress, blocked, spendUsd, harvestHours, highlight, markdown };
   }
 
   async postToSlack(range: Range, projectId?: string) {

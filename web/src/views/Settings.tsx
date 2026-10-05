@@ -177,7 +177,7 @@ export function Settings() {
           </div>
           <label className="field">Open on
             <select className="select" value={prefs.defaultView} onChange={(e) => setPref('defaultView', e.target.value as View)}>
-              {(['inbox', 'office', 'board', 'reports', 'agents', 'activity'] as View[]).map((v) => <option key={v} value={v}>{v}</option>)}
+              {(['inbox', 'office', 'board', 'reports', 'trophies', 'agents', 'activity'] as View[]).map((v) => <option key={v} value={v}>{v}</option>)}
             </select>
           </label>
           <label className="field">Group board by
@@ -208,6 +208,13 @@ export function Settings() {
             {(Object.keys(prefs.widgets) as Array<keyof Prefs['widgets']>).map((k) => (
               <label key={k}><input type="checkbox" checked={prefs.widgets[k]} onChange={(e) => setPref('widgets', { ...prefs.widgets, [k]: e.target.checked })} /> {k}</label>
             ))}
+          </div>
+        </div>
+        <div className="field">Gamification
+          <div className="checks">
+            <label><input type="checkbox" checked={prefs.game.enabled} onChange={(e) => setPref('game', { ...prefs.game, enabled: e.target.checked })} /> XP, levels, quests and office upgrades</label>
+            <label><input type="checkbox" checked={prefs.game.celebrations} disabled={!prefs.game.enabled} onChange={(e) => setPref('game', { ...prefs.game, celebrations: e.target.checked })} /> Celebrations when things ship</label>
+            <label><input type="checkbox" checked={prefs.game.sound} disabled={!prefs.game.enabled} onChange={(e) => setPref('game', { ...prefs.game, sound: e.target.checked })} /> Sound</label>
           </div>
         </div>
         <div><button className="btn ghost sm" onClick={() => confirm('Reset all UI preferences, including office layout and characters?') && reset()}>Reset UI preferences</button></div>

@@ -5,6 +5,8 @@ import { useFactory } from '../../state';
 import { useUI } from '../../ui';
 import { PRIORITY_META, ROLE_META, ago } from '../../meta';
 import type { AgentRole, Ticket } from '../../types';
+import { Decor } from './Decor';
+import { AgentTradingCard } from '../../components/Game';
 import { CORRIDOR_Y, DEFAULT_ZONES, DEPARTMENTS, DESK_Y, H, SEATS, W, breakSpots, chairPt, cx, points, seatX, zoneMap, type Pt, type Zone, type ZoneId } from './layout';
 import { Sim, type Char, type Role } from './sim';
 import { ACCESSORIES, HAIRS, SHIRTS, SKINS, Sprite } from './Sprite';
@@ -24,7 +26,7 @@ function palette(dark: boolean) {
 }
 
 export function Office() {
-  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId } = useFactory();
+  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId, game } = useFactory();
   const { prefs, setOffice } = usePrefs();
   const ui = useUI();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -221,6 +223,9 @@ export function Office() {
             </g>
           ))}
 
+          {/* unlocked upgrades from the Trophy room */}
+          {game && prefs.game.enabled && !editLayout && <Decor zones={zones} game={game} dark={dark} />}
+
           {/* characters, sorted by y for depth */}
           {!editLayout && [...sim.chars].sort((a, b) => a.y - b.y).map((c) => {
             const lk = look(c.role);
@@ -319,6 +324,8 @@ export function Office() {
           <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={onClose}>✕</button>
         </div>
         <div className="small">{status}</div>
+        {c.role !== 'pm' && game && prefs.game.enabled && <AgentTradingCard card={game.agents[c.role as AgentRole]} agent={agentOf(c.role as AgentRole)} color={lk.color} />}
+        {c.role === 'pm' && game && prefs.game.enabled && <div className="small">⭐ Level {game.level} · {game.title}{game.streak.current ? ` · 🔥 ${game.streak.current}-day streak` : ''}</div>}
         {ticket && <button className="btn sm" onClick={() => ui.openTicket(ticket.id)}>Open {ticket.key}: {ticket.title.slice(0, 28)}{ticket.title.length > 28 ? '…' : ''}</button>}
         {c.role === 'pm' && awaiting[0] && <button className="btn sm primary" onClick={() => ui.openTicket(awaiting[0].id)}>Review {awaiting[0].key}</button>}
         {c.home && <button className="btn sm" onClick={() => sim.releaseHome(c)}>Let them roam again</button>}

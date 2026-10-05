@@ -201,6 +201,10 @@ export interface Ticket {
   preview?: PreviewState;
   confidence?: Confidence;
   ship?: ShipInfo;
+  /** Why the ticket went back to the Coder, by cause. */
+  loops?: Partial<Record<LoopCause, number>>;
+  /** Spend per agent role. */
+  costByRole?: Partial<Record<AgentRole, number>>;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -328,7 +332,69 @@ export interface LogEvent {
   ts: number;
 }
 
+export type LoopCause = 'tests' | 'review' | 'ci' | 'coverage' | 'proof' | 'pm';
+
+// ---------------------------------------------------------------- gamification
+
+export interface Achievement {
+  id: string;
+  icon: string;
+  title: string;
+  desc: string;
+  /** Secret until earned. */
+  hidden?: boolean;
+}
+
+export interface Quest {
+  id: string;
+  icon: string;
+  title: string;
+  goal: number;
+  progress: number;
+  done: boolean;
+  xp: number;
+}
+
+export interface AgentCard {
+  role: AgentRole;
+  level: number;
+  xp: number;
+  tickets: number;
+  /** Coder: shipped without rework. Tester: caught problems before review. Reviewer: approved first time it looked. */
+  firstTry: number;
+  caught: number;
+  costUsd: number;
+  bestStreak: number;
+  streak: number;
+}
+
+export interface GameState {
+  xp: number;
+  earned: Array<{ id: string; at: number; ticketKey?: string }>;
+  streak: { current: number; best: number; lastDay?: string };
+  daily: { day: string; quests: Quest[] };
+  agents: Record<AgentRole, AgentCard>;
+  /** Counters behind achievements and stats. */
+  counters: Record<string, number>;
+  /** Projects with at least one ship. */
+  shippedProjects: string[];
+  /** Notable ships for the weekly highlight. */
+  highlights: Array<{ ticketId: string; key: string; title: string; score: number; at: number }>;
+  history: Array<{ at: number; xp: number; why: string }>;
+}
+
+export interface GameView extends GameState {
+  level: number;
+  title: string;
+  levelFloor: number;
+  nextLevelAt: number;
+  achievements: Array<Achievement & { earnedAt?: number }>;
+  unlocks: Array<{ id: string; icon: string; title: string; unlocked: boolean; how: string }>;
+  weeklyHighlight?: GameState['highlights'][number];
+}
+
 export interface DB {
+  game?: GameState;
   seq: number;
   seqs?: Record<string, number>; // last ticket number per key prefix
   tickets: Ticket[];
