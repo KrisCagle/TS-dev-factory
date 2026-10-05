@@ -45,6 +45,14 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Ticket sources**: a built-in board plus **GitHub Issues, Linear and Jira**. Imported tickets land in Backlog, and progress is sent back as comments and status changes.
 - **Shipping**: on approval, merge locally, open a GitHub PR, or leave the branch. Set per project.
 
+### Plugged into your workflow 🔌
+
+- **Claude Code plugin**: run the factory from Claude Code. `/plugin marketplace add KrisCagle/TS-dev-factory`, then `/plugin install factory@ai-dev-factory`, and you get `/factory:status`, `/factory:new <idea>`, `/factory:inbox`, `/factory:approve FAC-12`, `/factory:sendback FAC-12 <note>`, `/factory:ask FAC-12 <question>` and `/factory:standup`.
+- **MCP server for any Claude**: the same tools for Claude Desktop and Cowork, so you can say "turn this Slack thread into a factory ticket" or "what's waiting on me?" from any conversation. It has no dependencies; see [Using it from Claude](#using-it-from-claude).
+- **Factory plugins**: small JavaScript files in `plugins/` that add an agent role (like the example *Security reviewer*), a quality gate, a ticket source or a room in the Office, or react to events. Four examples are included; see [plugins/README.md](plugins/README.md).
+- **Approve from Slack**: sign-offs and decisions arrive in a channel with **Approve & ship**, **Send back…** (asks for your note) and other buttons. It uses Slack's Socket Mode, so it works without a public URL, and you can limit who may approve.
+- **Sentry → tickets**: unresolved Sentry issues become Backlog tickets with the stack trace, how many users it hits and acceptance criteria. Import on demand, every 10 minutes, or by webhook. When the fix ships, the Sentry issue is resolved with a comment.
+
 ### Staying in the loop
 
 - **Notifications** 🔔: Mac, browser and Slack pings when something needs you, CI fails, an agent is stuck, or a ticket ships or fails. Every channel and event can be switched off, with quiet hours.
@@ -86,6 +94,12 @@ Theme, accent color, density, board columns, card fields, header widgets, groupi
 | **House rules** | **Projects** |
 | ![Editing CLAUDE.md with suggestions from feedback](screenshots/rules.png) | ![Per-project repo, shipping and preview settings](screenshots/projects.png) |
 
+| Safety score and proof per criterion | Trophy room |
+| --- | --- |
+| ![A sign-off with its safety score, reasons and proof for each acceptance criterion](screenshots/safety-score.png) | ![Level, quests, highlight of the week and achievements](screenshots/trophy-room.png) |
+| **Ask a ticket** | |
+| ![Questions about a ticket answered from its record](screenshots/ask-a-ticket.png) | |
+
 | Notifications | Hand-off to the ship dock |
 | --- | --- |
 | ![Notification channels, events and quiet hours](screenshots/notifications.png) | ![PM carries an approved ticket to the rocket](screenshots/ship-dock-launch.png) |
@@ -97,8 +111,8 @@ Theme, accent color, density, board columns, card fields, header widgets, groupi
 Requires Node 20+ and git.
 
 ```bash
-git clone https://github.com/KrisCagle/ai-dev-factory.git
-cd ai-dev-factory
+git clone https://github.com/KrisCagle/TS-dev-factory.git
+cd TS-dev-factory
 npm install
 npm run build
 npm start                 # → http://localhost:4317
@@ -142,16 +156,47 @@ Agents load your repo's `CLAUDE.md`, so put team conventions there. You can edit
 
 **Notifications:** Mac notifications come from the factory server via `osascript`. For Slack, create an incoming webhook and paste it in Settings → Notifications; the same webhook is used for the daily standup.
 
-Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `FACTORY_MOCK_SPEED` (simulated agents only; 0.1 = 10× faster).
+Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `SENTRY_TOKEN`, `FACTORY_PLUGINS_DIR`, `FACTORY_MOCK_SPEED` (simulated agents only; 0.1 = 10× faster).
 
 **Harvest:** create a personal access token at Harvest ID → Developers. In Settings → Harvest, paste the token and your account ID, click **Test & load projects**, and pick a default project and task. Individual tickets can bill to a different project from the ticket drawer.
 
 **CI gate in live mode:** set "When you approve" to *Push branch & open a GitHub PR* and connect GitHub, with a token that has `repo` scope so the factory can read checks and merge.
 
+## Using it from Claude
+
+**Claude Code** (slash commands plus the MCP tools):
+
+```
+/plugin marketplace add KrisCagle/TS-dev-factory
+/plugin install factory@ai-dev-factory
+```
+
+**Claude Desktop** (or any MCP client): add this to `claude_desktop_config.json`, with the path to your clone:
+
+```json
+{
+  "mcpServers": {
+    "ai-dev-factory": {
+      "command": "node",
+      "args": ["/path/to/ai-dev-factory/integrations/claude-code-plugin/mcp/factory-mcp.mjs"],
+      "env": { "FACTORY_URL": "http://localhost:4317" }
+    }
+  }
+}
+```
+
+The factory must be running. Tools: `factory_status`, `list_tickets`, `get_ticket`, `draft_ticket`, `create_ticket`, `inbox`, `answer_inbox`, `add_note`, `ask_ticket`, `move_ticket`, `report`, `catch_up`, `pause_factory`.
+
+**Slack app:** at api.slack.com/apps choose *Create New App → From a manifest* and paste [`integrations/slack/manifest.json`](integrations/slack/manifest.json). Install it to your workspace, create an app-level token with `connections:write`, and paste the bot token (`xoxb-…`), app token (`xapp-…`) and channel into **Settings → Approve from Slack**. Invite the bot to the channel.
+
+**Sentry:** in Settings → Ticket sources, add your organization and project slugs and an auth token that can read projects, events and issues (and resolve issues). For instant imports, point a Sentry internal integration's webhook at `http://<your-factory>/api/webhooks/sentry` and paste its client secret as the webhook secret.
+
 ## Safety notes
 
 - Agents run with `acceptEdits` permission mode. They are limited to the tools you allow for each role, and they work inside a separate worktree, never in your checkout.
 - The Coder and Tester can run `Bash` by default. Remove it on the Agents page if you'd rather they didn't.
+- Factory plugins run inside the factory process with your user's permissions. Only add plugins you wrote or trust; the `examples/` folder isn't loaded until you copy a file out of it.
+- Anyone in the Slack channel can press the buttons unless you list approvers in Settings → Approve from Slack.
 - State, including connector tokens, is stored in plain JSON at `.factory/db.json`. Keep that file out of version control (it is already in `.gitignore`). Tokens are masked before they reach the browser.
 - Local merge runs `git merge --no-ff` in your repo, so keep the base branch checked out and clean. If the merge fails, the ticket moves to Failed and nothing is forced.
 
@@ -175,6 +220,9 @@ server/src
   game.ts             XP, levels, achievements, quests, streaks, agent cards
   asker.ts            "Ask a ticket" answers
   catchup.ts          "While you were away" summary
+  plugins.ts          factory plugin loader (roles, gates, sources, rooms, events)
+  slack-app.ts        Approve from Slack (Socket Mode)
+  connectors/sentry.ts  Sentry issues → tickets
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools
@@ -182,6 +230,10 @@ server/src
   git.ts              worktrees, commits, diff, merge, push
   store.ts            JSON-file store
 server/test           unit + API tests (vitest)
+plugins/              your factory plugins (examples/ has four to copy)
+integrations/
+  claude-code-plugin/ Claude Code plugin + zero-dependency MCP server
+  slack/manifest.json Slack app manifest
 e2e/                  browser tests (Playwright)
 web/src
   views/office/       animated office (layout, simulation, sprites)
@@ -191,21 +243,19 @@ web/src
 
 ## Roadmap
 
-Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, and standup/weekly reports.
+Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, standup/weekly reports, test suite and CI, proof per acceptance criterion, coverage gate, safety score, smoke test and revert, gamification, hand-off to VS Code, ask a ticket, catch-up, cost forecasts, dependencies, Claude Code plugin and MCP server, factory plugins, approve from Slack, and Sentry tickets.
 
 **Next up** ⭐
 
 - **Spend dashboard**: cost per ticket, agent and project over time, with a daily cap that pauses the factory.
-- **Dependencies and parallel planning**: "B waits on A", and never running two tickets that touch the same files at once.
 - **Office replay**: scrub back through a ticket's day in the office view.
 - **Recordings in reviews**: short Playwright videos next to the screenshots.
-- **Hand back from VS Code**: after editing a ticket's branch by hand, send it back to the Tester and Reviewer.
+- **Plugin agents in the Office**: plugin roles get their own character and desk.
 
 **Platform**
 
 - Swap the JSON store for SQLite/Postgres and add multi-user auth
 - Webhooks from GitHub/Linear/Jira instead of manual import
-- More roles (Security reviewer, Docs writer) using the same `AgentConfig` shape
 - Run agents in containers for stronger isolation
 
 ## License

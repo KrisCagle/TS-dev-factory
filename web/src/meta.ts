@@ -28,6 +28,8 @@ export const SOURCE_META: Record<TicketSource, { label: string; icon: string }> 
   github: { label: 'GitHub', icon: '🐙' },
   linear: { label: 'Linear', icon: '◐' },
   jira: { label: 'Jira', icon: '◆' },
+  sentry: { label: 'Sentry', icon: '🐞' },
+  plugin: { label: 'Plugin', icon: '🔌' },
 };
 
 export const ROLE_META: Record<AgentRole, { icon: string; desc: string }> = {

@@ -61,6 +61,13 @@ export interface Report {
   markdown: string;
 }
 
+export interface PluginsSummary {
+  dir: string;
+  plugins: Array<{ name: string; file: string; description?: string; enabled: boolean; error?: string; roles: string[]; gates: string[]; sources: string[]; rooms: string[] }>;
+  rooms: Array<{ id: string; label: string; icon?: string; plugin: string }>;
+  sources: Array<{ id: string; label: string; plugin: string }>;
+}
+
 export interface CatchUp {
   since: number;
   awayMs: number;
@@ -83,6 +90,7 @@ export interface ServerState {
   connectors: Array<{ source: TicketSource; label: string; enabled: boolean }>;
   hasApiKey: boolean;
   game: GameView;
+  slackApp?: { connected: boolean; error?: string };
 }
 
 export const api = {
@@ -99,6 +107,9 @@ export const api = {
   revert: (id: string, opts: { redo?: boolean; note?: string } = {}) => req<{ redo?: Ticket }>('POST', `/api/tickets/${id}/revert`, opts),
   smoke: (id: string) => req('POST', `/api/tickets/${id}/smoke`),
   game: () => req<GameView>('GET', '/api/game'),
+  plugins: () => req<PluginsSummary>('GET', '/api/plugins'),
+  pluginSync: (id: string, projectId?: string) => req<{ fetched: number; created: number }>('POST', `/api/plugins/sources/${id}/sync`, { projectId }),
+  slackAppTest: () => req<{ message: string }>('POST', '/api/slack-app/test'),
   takeover: (id: string, openEditor = true) => req<{ worktree?: string }>('POST', `/api/tickets/${id}/takeover`, { openEditor }),
   handback: (id: string, note?: string) => req('POST', `/api/tickets/${id}/handback`, { note }),
   ask: (id: string, question: string) => req<{ q: string; a: string }>('POST', `/api/tickets/${id}/ask`, { question }),

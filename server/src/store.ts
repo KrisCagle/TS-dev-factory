@@ -10,6 +10,8 @@ const SECRET_FIELDS: Array<[keyof Settings['connectors'], string]> = [
   ['github', 'token'],
   ['linear', 'apiKey'],
   ['jira', 'token'],
+  ['sentry', 'token'],
+  ['sentry', 'webhookSecret'],
 ];
 export const MASK = '••••••••';
 
@@ -63,6 +65,7 @@ export class Store extends EventEmitter {
             github: { ...fresh.settings.connectors.github, ...(raw.settings?.connectors?.github ?? {}) },
             linear: { ...fresh.settings.connectors.linear, ...(raw.settings?.connectors?.linear ?? {}) },
             jira: { ...fresh.settings.connectors.jira, ...(raw.settings?.connectors?.jira ?? {}) },
+            sentry: { ...fresh.settings.connectors.sentry, ...(raw.settings?.connectors?.sentry ?? {}) },
           },
           ciGate: { ...fresh.settings.ciGate, ...(raw.settings?.ciGate ?? {}) },
           watchdog: { ...fresh.settings.watchdog, ...(raw.settings?.watchdog ?? {}) },
@@ -72,6 +75,7 @@ export class Store extends EventEmitter {
           scoper: { ...fresh.settings.scoper, ...(rs.scoper ?? {}) },
           quality: mergeQuality(fresh.settings.quality, rs.quality),
           forecast: { ...fresh.settings.forecast, ...(rs.forecast ?? {}) },
+          slackApp: { ...fresh.settings.slackApp, ...(rs.slackApp ?? {}) },
           projects,
           defaultProjectId,
         },
@@ -330,6 +334,8 @@ export class Store extends EventEmitter {
     }
     if (s.harvest.token) s.harvest.token = MASK;
     if (s.notifications.slack.webhookUrl) s.notifications.slack.webhookUrl = MASK;
+    if (s.slackApp.botToken) s.slackApp.botToken = MASK;
+    if (s.slackApp.appToken) s.slackApp.appToken = MASK;
     return s;
   }
 
@@ -343,6 +349,7 @@ export class Store extends EventEmitter {
         github: { ...cur.connectors.github, ...(patch.connectors?.github ?? {}) },
         linear: { ...cur.connectors.linear, ...(patch.connectors?.linear ?? {}) },
         jira: { ...cur.connectors.jira, ...(patch.connectors?.jira ?? {}) },
+        sentry: { ...cur.connectors.sentry, ...(patch.connectors?.sentry ?? {}) },
       },
       ciGate: { ...cur.ciGate, ...(patch.ciGate ?? {}) },
       watchdog: { ...cur.watchdog, ...(patch.watchdog ?? {}) },
@@ -352,10 +359,14 @@ export class Store extends EventEmitter {
       scoper: { ...cur.scoper, ...(patch.scoper ?? {}) },
       quality: mergeQuality(cur.quality, patch.quality),
       forecast: { ...cur.forecast, ...(patch.forecast ?? {}) },
+      plugins: { ...(cur.plugins ?? {}), ...(patch.plugins ?? {}) },
+      slackApp: { ...cur.slackApp, ...(patch.slackApp ?? {}) },
       projects: patch.projects?.length ? patch.projects : cur.projects,
     };
     if (next.harvest.token === MASK) next.harvest.token = cur.harvest.token;
     if (next.notifications.slack.webhookUrl === MASK) next.notifications.slack.webhookUrl = cur.notifications.slack.webhookUrl;
+    if (next.slackApp.botToken === MASK) next.slackApp.botToken = cur.slackApp.botToken;
+    if (next.slackApp.appToken === MASK) next.slackApp.appToken = cur.slackApp.appToken;
     if (!next.projects.some((p) => p.id === next.defaultProjectId)) next.defaultProjectId = next.projects[0].id;
     // tickets of a deleted project move to the default one
     for (const t of this.db.tickets) if (!next.projects.some((p) => p.id === t.projectId)) t.projectId = next.defaultProjectId;

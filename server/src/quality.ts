@@ -124,6 +124,10 @@ export function confidence(t: Ticket, project?: Pick<Project, 'riskyPaths'>, qua
   const major = (t.review?.comments ?? []).filter((c) => c.severity === 'blocker' || c.severity === 'major').length;
   if (major) hit(10 * major, `${major} major review comment${major === 1 ? '' : 's'} still open`);
   if (t.iterations >= 2) hit(10, `Needed ${t.iterations} rework loops`);
+  for (const c of t.checks ?? []) {
+    if (!c.ok) hit(10, `${c.name}: ${c.message ?? 'failed'}`);
+    else good(`${c.name} passed`);
+  }
 
   score = Math.max(0, Math.min(100, score));
   // "high" means nothing needs a manual check: unproven criteria or red CI cap it at medium

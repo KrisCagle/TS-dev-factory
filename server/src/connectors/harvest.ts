@@ -13,7 +13,7 @@ function headers(s: Settings) {
   return {
     Authorization: `Bearer ${token}`,
     'Harvest-Account-Id': account,
-    'User-Agent': 'AI Dev Factory (https://github.com/KrisCagle/ai-dev-factory)',
+    'User-Agent': 'AI Dev Factory (https://github.com/KrisCagle/TS-dev-factory)',
   };
 }
 

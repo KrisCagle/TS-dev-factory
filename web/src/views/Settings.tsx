@@ -9,6 +9,7 @@ import { useHarvest } from '../harvest';
 import { useUI } from '../ui';
 import type { Settings as S, TicketSource } from '../types';
 import { NotificationSettingsCard, ProjectsSettings } from './SettingsExtra';
+import { ClaudeCard, PluginsCard, SlackAppCard } from './SettingsIntegrations';
 
 const ACCENTS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
 
@@ -139,11 +140,13 @@ export function Settings() {
 
       <NotificationSettingsCard s={s} setS={setS} dirty={dirty} />
 
+      <SlackAppCard s={s} setS={setS} dirty={dirty} />
+
       <HarvestSettings s={s} setS={setS} dirty={dirty} />
 
       <section className="card">
         <h2>🔌 Ticket sources</h2>
-        <div className="desc">Imported tickets land in Backlog. Progress is mirrored back as comments and status changes. Tokens can also come from GITHUB_TOKEN / LINEAR_API_KEY / JIRA_TOKEN env vars.</div>
+        <div className="desc">Imported tickets land in Backlog. Progress is mirrored back as comments and status changes. Tokens can also come from GITHUB_TOKEN / LINEAR_API_KEY / JIRA_TOKEN / SENTRY_TOKEN env vars.</div>
 
         <Conn title="🐙 GitHub Issues" on={s.connectors.github.enabled} onToggle={(v) => conn('github', { enabled: v })} onTest={() => test('github')} onSync={() => sync('github')}>
           <label className="field">Repository<input className="input mono" placeholder="owner/repo" value={s.connectors.github.repo} onChange={(e) => conn('github', { repo: e.target.value })} /></label>
@@ -163,7 +166,21 @@ export function Settings() {
           <label className="field">API token<input className="input mono" type="password" value={s.connectors.jira.token} onChange={(e) => conn('jira', { token: e.target.value })} /></label>
           <label className="field">JQL<input className="input mono" value={s.connectors.jira.jql} onChange={(e) => conn('jira', { jql: e.target.value })} /></label>
         </Conn>
+
+        <Conn title="🐞 Sentry" on={s.connectors.sentry.enabled} onToggle={(v) => conn('sentry', { enabled: v })} onTest={() => test('sentry')} onSync={() => sync('sentry')}>
+          <label className="field">Organization slug<input className="input mono" placeholder="acme" value={s.connectors.sentry.org} onChange={(e) => conn('sentry', { org: e.target.value })} /></label>
+          <label className="field">Project slug<input className="input mono" placeholder="web" value={s.connectors.sentry.project} onChange={(e) => conn('sentry', { project: e.target.value })} /></label>
+          <label className="field">Auth token<input className="input mono" type="password" placeholder="sntrys_… (project:read, event:read, issue resolve)" value={s.connectors.sentry.token} onChange={(e) => conn('sentry', { token: e.target.value })} /></label>
+          <label className="field">Issues to import<input className="input mono" value={s.connectors.sentry.query} onChange={(e) => conn('sentry', { query: e.target.value })} /></label>
+          <label className="field">Sentry address<input className="input mono" value={s.connectors.sentry.baseUrl} onChange={(e) => conn('sentry', { baseUrl: e.target.value })} /></label>
+          <label className="field">Webhook secret (optional)<input className="input mono" type="password" placeholder="for POST /api/webhooks/sentry" value={s.connectors.sentry.webhookSecret} onChange={(e) => conn('sentry', { webhookSecret: e.target.value })} /></label>
+          <div className="row"><Toggle on={s.connectors.sentry.autoImport} onChange={(v) => conn('sentry', { autoImport: v })} /> <span className="small">Import new issues every 10 minutes</span></div>
+        </Conn>
       </section>
+
+      <PluginsCard s={s} setS={setS} />
+
+      <ClaudeCard />
 
       <section className="card">
         <h2>🎨 Make it yours</h2>

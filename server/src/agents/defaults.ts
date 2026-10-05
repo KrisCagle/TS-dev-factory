@@ -101,6 +101,7 @@ export const DEFAULT_SETTINGS: Settings = {
     github: { enabled: false, token: '', repo: '', label: 'factory' },
     linear: { enabled: false, apiKey: '', teamKey: '', stateName: 'Todo' },
     jira: { enabled: false, baseUrl: '', email: '', token: '', jql: 'labels = factory AND statusCategory != Done' },
+    sentry: { enabled: false, baseUrl: 'https://sentry.io', org: '', project: '', token: '', query: 'is:unresolved', webhookSecret: '', autoImport: false },
   },
   ciGate: { enabled: true, pollSeconds: 30, mergeMethod: 'squash', maxWaitMinutes: 60 },
   watchdog: { enabled: true, stallMinutes: 10, maxNudges: 2 },
@@ -117,4 +118,5 @@ export const DEFAULT_SETTINGS: Settings = {
   scoper: { model: 'sonnet' },
   quality: { requireProof: false, coverage: { enabled: true, maxDropPct: 0.5 }, smoke: true },
   forecast: { approveAboveUsd: 3 },
+  slackApp: { enabled: false, botToken: '', appToken: '', channel: '', approvers: [], factoryUrl: 'http://localhost:4317' },
 };
