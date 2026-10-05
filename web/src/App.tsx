@@ -18,6 +18,7 @@ import { Reports } from './views/Reports';
 import { Rules } from './views/Rules';
 import { Trophies } from './views/Trophies';
 import { Celebrations, GamePill } from './components/Game';
+import { WhileAway } from './components/DevTools';
 
 const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
   { v: 'inbox', icon: '✋', label: 'Needs you', key: 'i' },
@@ -171,6 +172,7 @@ export function App() {
       {palette && <CommandPalette onClose={() => setPalette(false)} />}
       {toast && <div className="toast">{toast}</div>}
       <Celebrations />
+      <WhileAway />
     </UICtx.Provider>
   );
 }

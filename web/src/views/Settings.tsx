@@ -82,6 +82,12 @@ export function Settings() {
             <input className="input" type="number" min={0} step={0.5} value={s.budgetPerTicketUsd} onChange={(e) => setS({ ...s, budgetPerTicketUsd: Number(e.target.value) })} />
           </label>
         </div>
+        <div className="grid2">
+          <label className="field">Ask me before work forecast over (USD, 0 = never)
+            <input className="input" type="number" min={0} step={0.5} value={s.forecast.approveAboveUsd} onChange={(e) => setS({ ...s, forecast: { ...s.forecast, approveAboveUsd: Number(e.target.value) } })} />
+          </label>
+          <div className="small muted" style={{ alignSelf: 'end' }}>The Planner forecasts cost and time for every ticket. Forecasts adjust to how past tickets on each project actually went.</div>
+        </div>
         <div className="row"><Toggle on={s.gates.plan} onChange={(v) => setS({ ...s, gates: { ...s.gates, plan: v } })} /> <span>Approve every plan before coding starts</span></div>
         <div className="row"><Toggle on={s.gates.merge} onChange={(v) => setS({ ...s, gates: { ...s.gates, merge: v } })} /> <span>Sign off before anything merges or opens a PR</span></div>
       </section>

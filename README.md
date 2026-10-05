@@ -32,6 +32,11 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Live preview** ▶: run your app from a ticket's branch copy on its own port and click through the change before you sign off.
 - **Code viewer**: a Files tab on every ticket shows the changed files first with added lines highlighted, and has **Open in VS Code** to take over by hand.
 - **Ticket writer** ✨: type a rough idea, bug report or Slack thread and the Scoper turns it into a ticket with a clear title, context and acceptance criteria. It asks at most two questions, and you can skip them.
+- **Take over in VS Code, then hand it back** 🧑‍💻: pause the agents on a ticket and open its branch copy in your editor. When you click **Hand back**, the Tester and Reviewer check your edits (the Coder only steps in if something fails).
+- **Ask a ticket** 💬: an Ask tab on every ticket for questions like "why did you change this file?", "what's left?" or "why was it sent back?". Answers come from its plan, agent log, tests, review and diff (live mode also reads the branch).
+- **While you were away** 👋: come back after 20+ minutes and get one summary: what shipped, what's waiting on you, what broke, what started and what it cost. You can also open it from the ⌘K palette.
+- **Cost forecasts** 📏: the Planner forecasts size, cost and time for every ticket. Anything forecast over your limit (default $3) asks you first. Forecasts adjust to how past tickets on each project actually went, and the drawer shows forecast against actual.
+- **Dependencies and no collisions** ⛓: mark "waits on" between tickets and they run in order. Two tickets that plan to change the same files never code at the same time; the second one waits and says why.
 - **Notes and control**: add notes every agent treats as top priority, approve plans before coding (optional), stop a ticket, or pause the whole factory.
 
 ### Running more than one thing
@@ -168,6 +173,8 @@ server/src
   reports.ts          standup and weekly report
   quality.ts          acceptance-criteria proof, coverage gate, safety score
   game.ts             XP, levels, achievements, quests, streaks, agent cards
+  asker.ts            "Ask a ticket" answers
+  catchup.ts          "While you were away" summary
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools

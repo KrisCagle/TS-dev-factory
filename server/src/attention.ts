@@ -18,16 +18,21 @@ export const keys = {
   smoke: (t: Ticket) => `smoke:${t.id}`,
 };
 
-export function planGate(t: Ticket): NewItem {
+export function planGate(t: Ticket, overBudget?: number): NewItem {
   const risks = t.plan?.risks ?? [];
+  const e = t.plan?.estimate;
+  const cost = e ? e.adjustedCostUsd ?? e.costUsd : undefined;
+  const forecast = e ? `Forecast: size ${e.size}, about $${cost!.toFixed(2)} and ${Math.round(e.adjustedMinutes ?? e.minutes)} min${e.adjustedCostUsd ? ' (adjusted for how past forecasts on this project turned out)' : ''}.` : '';
   return {
     kind: 'decision',
     ticketId: t.id,
     key: keys.plan(t),
-    title: `Approve the plan for ${t.key}?`,
-    body: [t.plan?.summary, ...(t.plan?.steps ?? []).map((s, i) => `${i + 1}. ${s}`)].filter(Boolean).join('\n'),
+    title: overBudget ? `${t.key} is forecast at $${cost!.toFixed(2)} — go ahead?` : `Approve the plan for ${t.key}?`,
+    body: [t.plan?.summary, ...(t.plan?.steps ?? []).map((s, i) => `${i + 1}. ${s}`), forecast].filter(Boolean).join('\n'),
     brief: {
-      recommend: risks.length ? `Approve, and keep an eye on: ${risks[0]}` : 'Approve — the plan is small and self-contained.',
+      recommend: overBudget
+        ? `It’s over your $${overBudget.toFixed(2)} limit. Approve if it’s worth it, or send it back asking for a smaller first step.`
+        : risks.length ? `Approve, and keep an eye on: ${risks[0]}` : 'Approve — the plan is small and self-contained.',
       clearsWhen: 'You approve it, or send it back with direction.',
       whyNow: 'Coding on this ticket can’t start until the plan is approved.',
       ifItWaits: 'This ticket stays parked; the rest of the queue keeps moving.',

@@ -15,6 +15,8 @@ import { Reports, type Range } from './reports.js';
 import { Rules } from './rules.js';
 import { Scoper } from './scoper.js';
 import { Game } from './game.js';
+import { Asker } from './asker.js';
+import { catchUp } from './catchup.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
@@ -58,6 +60,7 @@ export function createFactory(opts: FactoryOptions) {
   let broadcastLate: (msg: unknown) => void = () => undefined;
   const notifier = new Notifier(store, (m) => broadcastLate(m));
   const reports = new Reports(store, notifier);
+  const asker = new Asker(store);
   const game = new Game(store, (event) => broadcastLate({ type: 'celebrate', event }));
   orch.hooks = {
     rulesFor: (projectId) => rules.forPrompt(projectId),
@@ -128,11 +131,33 @@ export function createFactory(opts: FactoryOptions) {
 
   const PM_MOVABLE: Stage[] = ['backlog', 'ready'];
 
+  /** Validate "waits on": real tickets, not itself, no cycles. */
+  const checkDeps = (t: Ticket, deps: unknown): string[] => {
+    if (!Array.isArray(deps)) throw Object.assign(new Error('dependsOn must be a list of ticket ids'), { status: 400 });
+    const ids = [...new Set(deps.map(String))];
+    for (const d of ids) {
+      if (d === t.id) throw Object.assign(new Error('A ticket can’t wait on itself.'), { status: 400 });
+      if (!store.ticket(d)) throw Object.assign(new Error(`Unknown ticket ${d}`), { status: 400 });
+    }
+    // would t be reachable from its own dependencies?
+    const seen = new Set<string>();
+    const stack = [...ids];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (cur === t.id) throw Object.assign(new Error('That would create a loop of tickets waiting on each other.'), { status: 400 });
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      stack.push(...(store.ticket(cur)?.dependsOn ?? []));
+    }
+    return ids;
+  };
+
   app.patch('/api/tickets/:id', wrap((req) => {
     const t = store.ticket(req.params.id);
     if (!t) throw Object.assign(new Error('not found'), { status: 404 });
-    const { title, description, priority, labels, stage, order, harvest: hv } = req.body as Partial<Ticket>;
+    const { title, description, priority, labels, stage, order, harvest: hv, dependsOn } = req.body as Partial<Ticket>;
     const patch: Partial<Ticket> = {};
+    if (dependsOn !== undefined) patch.dependsOn = checkDeps(t, dependsOn);
     if (hv !== undefined) patch.harvest = { ...(t.harvest ?? { loggedHours: 0 }), projectId: hv.projectId, taskId: hv.taskId };
     if (title !== undefined) patch.title = title;
     if (description !== undefined) patch.description = description;
@@ -163,6 +188,14 @@ export function createFactory(opts: FactoryOptions) {
   }));
   app.post('/api/tickets/:id/cancel', wrap((req) => orch.cancel(req.params.id)));
   app.post('/api/tickets/:id/retry', wrap((req) => orch.retry(req.params.id)));
+  app.post('/api/tickets/:id/takeover', wrap(async (req) => {
+    const r = orch.takeOver(req.params.id);
+    if (req.body?.openEditor && r.worktree) await files.openInEditor(req.params.id).catch(() => undefined);
+    return r;
+  }));
+  app.post('/api/tickets/:id/handback', wrap((req) => orch.handBack(req.params.id, req.body?.note ? String(req.body.note) : undefined)));
+  app.post('/api/tickets/:id/ask', wrap((req) => asker.ask(req.params.id, String(req.body?.question ?? ''))));
+  app.get('/api/catchup', wrap((req) => catchUp(store, Number(req.query.since) || Date.now() - 3_600_000, (req.query.projectId as string) || undefined)));
   app.post('/api/tickets/:id/revert', wrap((req) => orch.revert(req.params.id, { redo: !!req.body?.redo, note: req.body?.note ? String(req.body.note) : undefined })));
   app.post('/api/tickets/:id/smoke', wrap((req) => {
     if (!store.ticket(req.params.id)?.ship) throw Object.assign(new Error('This ticket hasn’t shipped yet.'), { status: 409 });

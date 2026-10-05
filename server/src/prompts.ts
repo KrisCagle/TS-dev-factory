@@ -7,7 +7,17 @@ export const PLAN_SCHEMA = {
     summary: { type: 'string' },
     steps: { type: 'array', items: { type: 'string' } },
     risks: { type: 'array', items: { type: 'string' } },
-    files: { type: 'array', items: { type: 'string' } },
+    files: { type: 'array', items: { type: 'string' }, description: 'Repo-relative paths you expect to change' },
+    estimate: {
+      type: 'object',
+      description: 'Forecast for the whole ticket (coding, testing, review, rework)',
+      properties: {
+        size: { type: 'string', enum: ['S', 'M', 'L', 'XL'] },
+        costUsd: { type: 'number', description: 'Expected total agent spend in USD' },
+        minutes: { type: 'number', description: 'Expected wall-clock minutes until it is ready for sign-off' },
+      },
+      required: ['size', 'costUsd', 'minutes'],
+    },
   },
   required: ['summary', 'steps', 'risks', 'files'],
 };
@@ -107,7 +117,8 @@ ${t.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}${t.plan.files.length 
 export function plannerPrompt(t: Ticket) {
   return `${header(t)}
 
-Produce an implementation plan for this ticket. Return it in the structured output format.`;
+Produce an implementation plan for this ticket. List the files you expect to change (repo-relative), and forecast the size, total agent cost in USD and minutes until it's ready for sign-off.
+Return it in the structured output format.`;
 }
 
 export function coderPrompt(t: Ticket) {

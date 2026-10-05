@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useFactory } from '../state';
 import { usePrefs, type View } from '../prefs';
 import { useUI } from '../ui';
+import { requestCatchUp } from './DevTools';
 import { PRIORITY_META, STAGE_META } from '../meta';
 import type { Priority, Stage } from '../types';
 
@@ -172,6 +173,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       go('reports', 'Go to Reports', '📊', ''),
       go('rules', 'Go to House rules', '📐', ''),
       go('trophies', 'Go to the Trophy room', '🏆', 'g t'),
+      { id: 'away', label: 'What happened in the last 4 hours?', icon: '👋', run: () => requestCatchUp() },
       ...projects.map((p) => ({ id: `proj-${p.id}`, label: `Switch to project: ${p.name}`, icon: '🗂', run: () => set({ activeProject: p.id }) })),
       ...(projects.length > 1 ? [{ id: 'proj-all', label: 'Show all projects', icon: '🗂', run: () => set({ activeProject: 'all' }) }] : []),
       ...connectors.filter((c) => c.enabled).map((c) => ({ id: `sync-${c.source}`, label: `Sync from ${c.label}`, icon: '⟳', run: () => api.sync(c.source, targetProjectId).then((r) => ui.toast(`${c.label}: ${r.created} new of ${r.fetched}`)) })),

@@ -9,11 +9,12 @@ export type Stage =
   | 'reviewing'
   | 'ci'                 // PR open, waiting for required checks to go green
   | 'awaiting_approval'  // a PM gate: approve the plan, or approve the final change
+  | 'manual'             // you took it over in your editor; hand it back when you're done
   | 'done'
   | 'failed';
 
 export const STAGES: Stage[] = [
-  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed',
+  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'done', 'failed',
 ];
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
@@ -28,6 +29,17 @@ export interface Plan {
   steps: string[];
   risks: string[];
   files: string[];
+  /** The Planner's forecast for the whole ticket. */
+  estimate?: Estimate;
+}
+
+export interface Estimate {
+  size: 'S' | 'M' | 'L' | 'XL';
+  costUsd: number;
+  minutes: number;
+  /** The raw forecast scaled by how this project's past forecasts turned out. */
+  adjustedCostUsd?: number;
+  adjustedMinutes?: number;
 }
 
 export interface TestReport {
@@ -205,6 +217,16 @@ export interface Ticket {
   loops?: Partial<Record<LoopCause, number>>;
   /** Spend per agent role. */
   costByRole?: Partial<Record<AgentRole, number>>;
+  /** Tickets that must ship before this one starts. */
+  dependsOn?: string[];
+  /** Why a ready ticket isn't being picked up yet. */
+  waitingOn?: { reason: 'dependency' | 'overlap'; keys: string[]; files?: string[] };
+  /** Where the pipeline picks up next time: after a hand-back from your editor, or after an overlap wait. */
+  resume?: 'code' | 'test';
+  /** You took it over in your editor. */
+  manual?: { since: number; from: Stage };
+  /** Questions you asked about this ticket, with the answers. */
+  chat?: Array<{ q: string; a: string; at: number }>;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -269,6 +291,12 @@ export interface Settings {
   reports: { dailySlack: boolean; dailyTime: string; lastSent?: string };
   scoper: { model: string };
   quality: QualitySettings;
+  forecast: ForecastSettings;
+}
+
+export interface ForecastSettings {
+  /** Ask before starting work the Planner expects to cost more than this (0 = never ask). */
+  approveAboveUsd: number;
 }
 
 export interface QualitySettings {
@@ -395,6 +423,8 @@ export interface GameView extends GameState {
 
 export interface DB {
   game?: GameState;
+  /** Per project: how actual cost/time compared with the Planner's forecasts. */
+  calibration?: Record<string, { n: number; costRatio: number; timeRatio: number }>;
   seq: number;
   seqs?: Record<string, number>; // last ticket number per key prefix
   tickets: Ticket[];

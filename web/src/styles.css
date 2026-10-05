@@ -424,3 +424,18 @@ pre.code { margin: 0; font: 12px/1.5 var(--mono); overflow: auto; max-height: 70
 .launch i { position: absolute; top: -12px; width: 8px; height: 4px; border-radius: 1px; animation: confetti 2.2s ease-in forwards; }
 @keyframes confetti { to { transform: translate(var(--dx), 105vh) rotate(720deg); opacity: .4; } }
 @media (prefers-reduced-motion: reduce) { .celebrate { animation: none; } }
+
+/* ---------- developer helpers: hand-off, dependencies, forecast, ask, catch-up */
+.handoff { display: grid; gap: 8px; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); background: color-mix(in srgb, var(--warn) 8%, var(--panel)); border-radius: 10px; padding: 10px 12px; }
+.chip.dep { gap: 6px; }
+.chip.dep.ok { color: var(--ok); }
+.forecast { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ask { display: grid; gap: 10px; }
+.asklog { display: grid; gap: 10px; max-height: 52vh; overflow: auto; padding-right: 4px; }
+.qa { display: grid; gap: 4px; }
+.qa .q { justify-self: end; max-width: 85%; background: var(--accent); color: white; padding: 8px 12px; border-radius: 14px 14px 4px 14px; font-size: 13.5px; }
+.qa .a { justify-self: start; max-width: 92%; background: var(--panel2); border: 1px solid var(--border); padding: 8px 12px; border-radius: 14px 14px 14px 4px; font-size: 13.5px; white-space: pre-wrap; }
+.modal.away { width: min(620px, 94vw); max-height: 84vh; overflow: auto; display: grid; gap: 12px; padding: 18px; }
+.away .headline { font-size: 16px; font-weight: 600; }
+.away ul { margin: 6px 0 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13.5px; }
+.away li .chip { margin-left: 6px; }

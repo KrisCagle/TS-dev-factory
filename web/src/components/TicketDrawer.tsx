@@ -1,4 +1,5 @@
 import { QualityPanel, ShipPanel } from './Quality';
+import { AskTicket, Dependencies, Forecast, HandOff, WaitingBanner } from './DevTools';
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useFactory } from '../state';
@@ -13,7 +14,7 @@ import { HarvestPanel } from './HarvestPanel';
 import { FileViewer, PreviewControls } from './FileViewer';
 import { ProjectTag } from './Bits';
 
-type Tab = 'overview' | 'live' | 'diff' | 'files' | 'quality';
+type Tab = 'overview' | 'live' | 'diff' | 'files' | 'quality' | 'ask';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void }) {
   const { tickets, logs: allLogs, agents, attention } = useFactory();
@@ -91,6 +92,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
             {t.stage === 'failed' && <button className="btn primary" disabled={busy} onClick={() => act(() => api.retry(t.id), 'Re-queued')}>↻ Retry</button>}
             {t.prUrl && <a className="btn" href={t.prUrl} target="_blank" rel="noreferrer">View PR ↗</a>}
             {(t.worktree || t.preview) && <PreviewControls t={t} compact />}
+            {t.stage !== 'manual' && <HandOff t={t} />}
             <span style={{ flex: 1 }} />
             <button className="btn ghost sm danger" onClick={() => confirm(`Delete ${t.key}?`) && act(async () => { await api.deleteTicket(t.id); onClose(); }, 'Deleted')}>Delete</button>
           </div>
@@ -103,9 +105,9 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
         )}
 
         <nav className="tabs">
-          {(['overview', 'live', 'diff', 'files', 'quality'] as Tab[]).map((k) => (
+          {(['overview', 'live', 'diff', 'files', 'quality', 'ask'] as Tab[]).map((k) => (
             <button key={k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
-              {{ overview: 'Overview', live: `Agent log${live ? ' ●' : ''}`, diff: 'Diff', files: 'Files', quality: 'Tests & review' }[k]}
+              {{ overview: 'Overview', live: `Agent log${live ? ' ●' : ''}`, diff: 'Diff', files: 'Files', quality: 'Tests & review', ask: `Ask${t.chat?.length ? ` (${t.chat.length})` : ''}` }[k]}
             </button>
           ))}
         </nav>
@@ -113,10 +115,14 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
         <div className="drawer-b">
           {tab === 'overview' && (
             <>
+              {t.stage === 'manual' && <HandOff t={t} />}
+              <WaitingBanner t={t} />
+              <Forecast t={t} />
               <label className="field">Description
                 <textarea className="textarea" style={{ minHeight: 120 }} defaultValue={t.description} key={t.id + 'd'} onBlur={(e) => e.target.value !== t.description && save({ description: e.target.value })} />
               </label>
               {t.error && <div className="banner" style={{ margin: 0 }}>⚠ {t.error}</div>}
+              <Dependencies t={t} />
               <ShipPanel t={t} />
               {(t.ci || t.prNumber) && (
                 <div>
@@ -164,6 +170,7 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
           {tab === 'live' && <LogView logs={logs} color={color} />}
           {tab === 'diff' && <Diff text={t.diff ?? ''} />}
           {tab === 'files' && <FileViewer t={t} />}
+          {tab === 'ask' && <AskTicket t={t} />}
           {tab === 'quality' && (
             <>
               <QualityPanel t={t} open />
