@@ -94,6 +94,12 @@ Theme, accent color, density, board columns, card fields, header widgets, groupi
 | **House rules** | **Projects** |
 | ![Editing CLAUDE.md with suggestions from feedback](screenshots/rules.png) | ![Per-project repo, shipping and preview settings](screenshots/projects.png) |
 
+| Safety score and proof per criterion | Trophy room |
+| --- | --- |
+| ![A sign-off with its safety score, reasons and proof for each acceptance criterion](screenshots/safety-score.png) | ![Level, quests, highlight of the week and achievements](screenshots/trophy-room.png) |
+| **Ask a ticket** | |
+| ![Questions about a ticket answered from its record](screenshots/ask-a-ticket.png) | |
+
 | Notifications | Hand-off to the ship dock |
 | --- | --- |
 | ![Notification channels, events and quiet hours](screenshots/notifications.png) | ![PM carries an approved ticket to the rocket](screenshots/ship-dock-launch.png) |
