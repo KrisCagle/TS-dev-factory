@@ -12,7 +12,7 @@ import type { Store } from './store.js';
 import {
   PRIORITY_RANK,
   type Settings,
-  type AgentRole, type AttentionItem, type ShipInfo, type CaseVerdict, type CiCheck, type CheckState, type Plan, type Review, type Stage, type TestReport, type Ticket,
+  type AgentRole, type AttentionItem, type ShipInfo, type LoopCause, type CaseVerdict, type CiCheck, type CheckState, type Plan, type Review, type Stage, type TestReport, type Ticket,
 } from './types.js';
 
 type Phase = 'plan' | 'code';
@@ -164,7 +164,7 @@ export class Orchestrator {
     this.addNote(id, feedback);
     this.store.closeAttentionFor(id);
     void this.harvest.stopIfRunning(id);
-    this.store.updateTicket(id, { iterations: 0 });
+    this.store.updateTicket(id, { iterations: 0, loops: { ...(t.loops ?? {}), pm: (t.loops?.pm ?? 0) + 1 } });
     this.log(id, 'pm', 'pm', `Sent back: ${feedback}`);
     void this.pipeline(id, t.gate === 'plan' ? 'plan' : 'code');
   }
@@ -349,6 +349,7 @@ export class Orchestrator {
     }
     this.store.updateTicket(id, { ship: { ...t.ship, reverted } });
     this.store.closeAttentionFor(id, 'smoke');
+    this.store.emit('game:event', { type: 'revert', ticketId: id });
     this.log(id, 'pm', 'pm', `↩️ Reverted${reverted.prUrl ? ` — ${reverted.prUrl}` : ''}.`);
     if (opts.redo) {
       const smoke = t.ship.smoke?.state === 'failed' ? `\n\n## Why it was reverted\nThe smoke test failed right after it shipped:\n\`\`\`\n${t.ship.smoke.output ?? ''}\n\`\`\`` : '';
@@ -525,7 +526,8 @@ export class Orchestrator {
   private loopBack(id: string, reason: string) {
     const t = this.store.ticket(id)!;
     const iterations = t.iterations + 1;
-    this.store.updateTicket(id, { iterations });
+    const cause: LoopCause = /review/i.test(reason) ? 'review' : /coverage/i.test(reason) ? 'coverage' : /criteria/i.test(reason) ? 'proof' : 'tests';
+    this.store.updateTicket(id, { iterations, loops: { ...(t.loops ?? {}), [cause]: (t.loops?.[cause] ?? 0) + 1 } });
     if (iterations >= this.store.settings().maxLoops) {
       throw new Escalate(`${reason} after ${iterations} loops — needs a PM decision.`);
     }
@@ -575,7 +577,7 @@ export class Orchestrator {
           },
         });
         const t = this.store.ticket(id)!;
-        this.store.updateTicket(id, { costUsd: +(t.costUsd + r.costUsd).toFixed(4), tokens: t.tokens + r.tokens });
+        this.store.updateTicket(id, { costUsd: +(t.costUsd + r.costUsd).toFixed(4), tokens: t.tokens + r.tokens, costByRole: { ...(t.costByRole ?? {}), [role]: +((t.costByRole?.[role] ?? 0) + r.costUsd).toFixed(4) } });
         // Finished without the result we asked for → one nudge to produce it.
         if (schema && r.structured === undefined && attempt < maxNudges) {
           this.log(id, 'factory', 'status', `⏰ Watchdog: ${agent.name} finished without a result — asking again.`);
@@ -726,6 +728,7 @@ export class Orchestrator {
       const iterations = t.iterations + 1;
       this.store.updateTicket(id, {
         iterations,
+        loops: { ...(t.loops ?? {}), ci: (t.loops?.ci ?? 0) + 1 },
         testReport: {
           passed: false,
           summary: `CI failed: ${failed.map((c) => c.name).join(', ') || 'checks'}`,

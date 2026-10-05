@@ -46,6 +46,17 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Standup and weekly report** 📊: shipped, in progress, waiting on you, blocked, agent spend and Harvest hours. Copy as Markdown, post to Slack, or have the standup posted every weekday.
 - **Harvest time tracking** ⏱: a timer starts on the ticket's Harvest project when you open something that needs you and stops when you decide. You can also log hours by hand. Today's total sits in the top bar.
 
+### Game on 🏆
+
+Optional, and you can switch any of it off. It rewards shipping *well*, not shipping a lot.
+
+- **XP and levels**: from Intern to Factory Legend. A ship earns more with a high safety score, no rework and every acceptance criterion proven. Answering the inbox quickly earns a little too. A revert costs XP, but reverting fast earns *Owned it*.
+- **Achievements**: 16 of them, like *Clean sweep* (no rework), *Show your work* (every criterion proven), *Safe hands* (5 high-confidence ships in a row), *Green machine* (10 first-try CI passes) and *Inbox zero* (before 10am).
+- **Daily quests and streaks**: three small goals a day ("Clear the inbox", "Ship a ticket with no rework") and a streak of working days with a ship. Weekends don't break it.
+- **Agent trading cards**: click a character in the Office, or open the **Trophy room**, to see each agent's level, tickets shipped, clean-first-time rate, problems caught and spend.
+- **Office upgrades**: plants, a trophy shelf with your badges, an espresso bar, a streak sign, an arcade cabinet, an aquarium and a golden rocket unlock as you level up.
+- **Launch celebrations**: a rocket and confetti when something ships, plus pop-ups for achievements, quests and level-ups (sound is optional). The weekly report names the week's best ship.
+
 ### The Office 🏢
 
 A live, top-down animated office. Each agent is a character that pulls tickets off the Ticket Wall and carries them desk to desk. When review or tests send work back, they meet at the Huddle table. Builds wait in the CI server room, finished work goes to your PM office, and approved work launches from the Ship Dock. Speech bubbles show which tool each agent is running.
@@ -56,7 +67,7 @@ A live, top-down animated office. Each agent is a character that pulls tickets o
 
 ### Make it yours
 
-Theme, accent color, density, board columns, card fields, header widgets, grouping and default view. There's a ⌘K command palette and keyboard shortcuts: `n` new ticket, `g` then `i/o/b/r/a/h/l/s` to navigate, `/` to filter.
+Theme, accent color, density, board columns, card fields, header widgets, grouping and default view. There's a ⌘K command palette and keyboard shortcuts: `n` new ticket, `g` then `i/o/b/r/a/h/t/l/s` to navigate, `/` to filter.
 
 ## Screenshots
 
@@ -155,6 +166,8 @@ server/src
   rules.ts            house rules (CLAUDE.md)
   notifier.ts         Mac / browser / Slack notifications
   reports.ts          standup and weekly report
+  quality.ts          acceptance-criteria proof, coverage gate, safety score
+  game.ts             XP, levels, achievements, quests, streaks, agent cards
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools
@@ -165,7 +178,7 @@ server/test           unit + API tests (vitest)
 e2e/                  browser tests (Playwright)
 web/src
   views/office/       animated office (layout, simulation, sprites)
-  views/              Inbox, Board, Reports, House rules, Agents, Activity, Settings
+  views/              Inbox, Board, Reports, House rules, Trophy room, Agents, Activity, Settings
   components/         ticket drawer, diff viewer, command palette
 ```
 

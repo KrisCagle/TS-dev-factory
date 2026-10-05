@@ -171,6 +171,7 @@ export function CommandPalette({ onClose }: { onClose: () => void }) {
       { id: 'demo', label: 'Load demo tickets', icon: '🎲', run: () => api.demo(targetProjectId) },
       go('reports', 'Go to Reports', '📊', ''),
       go('rules', 'Go to House rules', '📐', ''),
+      go('trophies', 'Go to the Trophy room', '🏆', 'g t'),
       ...projects.map((p) => ({ id: `proj-${p.id}`, label: `Switch to project: ${p.name}`, icon: '🗂', run: () => set({ activeProject: p.id }) })),
       ...(projects.length > 1 ? [{ id: 'proj-all', label: 'Show all projects', icon: '🗂', run: () => set({ activeProject: 'all' }) }] : []),
       ...connectors.filter((c) => c.enabled).map((c) => ({ id: `sync-${c.source}`, label: `Sync from ${c.label}`, icon: '⟳', run: () => api.sync(c.source, targetProjectId).then((r) => ui.toast(`${c.label}: ${r.created} new of ${r.fetched}`)) })),

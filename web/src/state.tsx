@@ -1,7 +1,14 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type FactoryStatus, type ServerState, type Stats } from './api';
-import type { AgentConfig, AttentionItem, LogEvent, Project, Settings, Ticket } from './types';
+import type { AgentConfig, AttentionItem, GameView, LogEvent, Project, Settings, Ticket } from './types';
 import { usePrefs } from './prefs';
+
+export type Celebration =
+  | { type: 'xp'; amount: number; why: string }
+  | { type: 'achievement'; achievement: { id: string; icon: string; title: string; desc: string }; xp: number }
+  | { type: 'levelup'; level: number; title: string }
+  | { type: 'quest'; quest: { id: string; icon: string; title: string; xp: number } }
+  | { type: 'ship'; ticketId: string; key: string; title: string; xp: number; score?: number; firstTry: boolean };
 
 export interface Notice { event: string; title: string; body: string; ticketId?: string }
 
@@ -17,6 +24,10 @@ interface FactoryState {
   /** where new tickets go: the selected project, else the default one */
   targetProjectId: string;
   onNotice: (fn: (n: Notice) => void) => () => void;
+  /** XP, level, streak, quests, achievements, agent cards. */
+  game: GameView | null;
+  /** subscribe to celebrations (ship, achievement, level-up, quest) */
+  onCelebrate: (fn: (e: Celebration) => void) => () => void;
   attention: AttentionItem[];
   /** open items the PM can act on right now */
   needsYou: AttentionItem[];
@@ -42,6 +53,7 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
   const [connected, setConnected] = useState(false);
   const listeners = useRef(new Set<(e: LogEvent) => void>());
   const noticeListeners = useRef(new Set<(n: Notice) => void>());
+  const celebrateListeners = useRef(new Set<(e: Celebration) => void>());
   const { prefs } = usePrefs();
 
   const refresh = async () => {
@@ -94,6 +106,12 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
           case 'factory':
             setS((p) => p && { ...p, factory: msg.factory });
             break;
+          case 'game':
+            setS((p) => p && { ...p, game: msg.game });
+            break;
+          case 'celebrate':
+            celebrateListeners.current.forEach((fn) => fn(msg.event));
+            break;
           case 'stats':
             setS((p) => p && { ...p, stats: msg.stats });
             break;
@@ -126,6 +144,11 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
       onNotice: (fn) => {
         noticeListeners.current.add(fn);
         return () => noticeListeners.current.delete(fn);
+      },
+      game: s?.game ?? null,
+      onCelebrate: (fn) => {
+        celebrateListeners.current.add(fn);
+        return () => celebrateListeners.current.delete(fn);
       },
       attention,
       needsYou: attention.filter((a) => a.status === 'open').sort((a, b) => KIND_RANK[a.kind] - KIND_RANK[b.kind] || a.createdAt - b.createdAt),
