@@ -7,7 +7,7 @@
   "author": "Kris Cagle",
   "repository": {
     "type": "git",
-    "url": "https://github.com/KrisCagle/ai-dev-factory.git"
+    "url": "https://github.com/KrisCagle/TS-dev-factory.git"
   },
   "engines": {
     "node": ">=20"

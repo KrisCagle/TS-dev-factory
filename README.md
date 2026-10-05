@@ -47,7 +47,7 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 
 ### Plugged into your workflow 🔌
 
-- **Claude Code plugin**: run the factory from Claude Code. `/plugin marketplace add KrisCagle/ai-dev-factory`, then `/plugin install factory@ai-dev-factory`, and you get `/factory:status`, `/factory:new <idea>`, `/factory:inbox`, `/factory:approve FAC-12`, `/factory:sendback FAC-12 <note>`, `/factory:ask FAC-12 <question>` and `/factory:standup`.
+- **Claude Code plugin**: run the factory from Claude Code. `/plugin marketplace add KrisCagle/TS-dev-factory`, then `/plugin install factory@ai-dev-factory`, and you get `/factory:status`, `/factory:new <idea>`, `/factory:inbox`, `/factory:approve FAC-12`, `/factory:sendback FAC-12 <note>`, `/factory:ask FAC-12 <question>` and `/factory:standup`.
 - **MCP server for any Claude**: the same tools for Claude Desktop and Cowork, so you can say "turn this Slack thread into a factory ticket" or "what's waiting on me?" from any conversation. It has no dependencies; see [Using it from Claude](#using-it-from-claude).
 - **Factory plugins**: small JavaScript files in `plugins/` that add an agent role (like the example *Security reviewer*), a quality gate, a ticket source or a room in the Office, or react to events. Four examples are included; see [plugins/README.md](plugins/README.md).
 - **Approve from Slack**: sign-offs and decisions arrive in a channel with **Approve & ship**, **Send back…** (asks for your note) and other buttons. It uses Slack's Socket Mode, so it works without a public URL, and you can limit who may approve.
@@ -111,8 +111,8 @@ Theme, accent color, density, board columns, card fields, header widgets, groupi
 Requires Node 20+ and git.
 
 ```bash
-git clone https://github.com/KrisCagle/ai-dev-factory.git
-cd ai-dev-factory
+git clone https://github.com/KrisCagle/TS-dev-factory.git
+cd TS-dev-factory
 npm install
 npm run build
 npm start                 # → http://localhost:4317
@@ -167,7 +167,7 @@ Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY
 **Claude Code** (slash commands plus the MCP tools):
 
 ```
-/plugin marketplace add KrisCagle/ai-dev-factory
+/plugin marketplace add KrisCagle/TS-dev-factory
 /plugin install factory@ai-dev-factory
 ```
 

@@ -98,7 +98,7 @@ export function SlackAppCard({ s, setS, dirty }: { s: S; setS: (s: S) => void; d
 export function ClaudeCard() {
   const ui = useUI();
   const copy = (t: string) => navigator.clipboard.writeText(t).then(() => ui.toast('Copied'), () => ui.toast('⚠ Couldn’t reach the clipboard'));
-  const steps = ['/plugin marketplace add KrisCagle/ai-dev-factory', '/plugin install factory@ai-dev-factory'];
+  const steps = ['/plugin marketplace add KrisCagle/TS-dev-factory', '/plugin install factory@ai-dev-factory'];
   const desktop = JSON.stringify({ mcpServers: { 'ai-dev-factory': { command: 'node', args: ['/path/to/ai-dev-factory/integrations/claude-code-plugin/mcp/factory-mcp.mjs'], env: { FACTORY_URL: location.origin } } } }, null, 2);
   return (
     <section className="card">
