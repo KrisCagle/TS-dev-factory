@@ -353,3 +353,37 @@ pre.code { margin: 0; font: 12px/1.5 var(--mono); overflow: auto; max-height: 70
   .fview { grid-template-columns: 1fr; }
   .flist { max-height: 180px; border-right: 0; border-bottom: 1px solid var(--border); }
 }
+
+/* ---------------------------------------------------------------- leads (the sales desk) */
+.leads { padding: 16px 18px 28px; max-width: 1400px; }
+.lead-profile { padding: 16px 18px 28px; max-width: 1000px; }
+.leads .banner, .lead-profile .banner { margin: 0 0 12px; }
+.leads-split { display: grid; grid-template-columns: minmax(280px, 400px) 1fr; gap: 14px; align-items: start; }
+.lead-list { display: grid; gap: 6px; max-height: calc(100vh - 200px); overflow: auto; padding-right: 2px; }
+.lead-row { display: flex; gap: 10px; align-items: center; text-align: left; padding: 9px 10px; border-radius: 10px; background: var(--panel); border: 1px solid var(--border); color: var(--text); cursor: pointer; font: inherit; }
+.lead-row:hover { border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); }
+.lead-row.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+.lead-row-main { display: grid; gap: 2px; min-width: 0; flex: 1; }
+.lead-row-title { font-size: 13.5px; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.lead-score { flex: none; display: inline-grid; place-items: center; width: 36px; height: 36px; border-radius: 9px; font-weight: 700; font-size: 14px; font-variant-numeric: tabular-nums; }
+.lead-score.hot { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+.lead-score.warm { background: color-mix(in srgb, var(--warn) 16%, transparent); color: var(--warn); }
+.lead-score.cool { background: var(--bg2); color: var(--muted); }
+.lead-detail { padding: 18px; display: grid; gap: 14px; position: sticky; top: 0; }
+.lead-detail h3 { margin: 0 0 4px; font-size: 16px; letter-spacing: -0.01em; }
+.lead-detail h3 a { color: var(--text); text-decoration: none; }
+.lead-detail h3 a:hover { color: var(--accent); }
+.lead-detail h4 { margin: 0 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+.lead-detail p { margin: 0; font-size: 14px; line-height: 1.5; }
+.lead-angle { padding: 10px 12px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 8%, var(--panel)); border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border)); }
+.lead-excerpt { margin: 0; padding: 10px 12px; border-left: 3px solid var(--border); background: var(--panel2); border-radius: 0 8px 8px 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; max-height: 220px; overflow: auto; }
+.lead-detail footer { border-top: 1px solid var(--border); padding-top: 12px; }
+.lead-field { display: grid; gap: 4px; margin-top: 8px; }
+.lead-field .textarea { min-height: 0; }
+.lead-profile .lead-line { display: grid; gap: 6px; padding: 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel2); }
+.lead-profile .lead-line .textarea { min-height: 0; }
+@media (max-width: 900px) {
+  .leads-split { grid-template-columns: 1fr; }
+  .lead-list { max-height: none; }
+  .lead-detail { position: static; }
+}

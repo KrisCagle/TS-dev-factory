@@ -12,6 +12,7 @@ import { Agents } from './views/Agents';
 import { Board } from './views/Board';
 import { Office } from './views/office/Office';
 import { Inbox } from './views/Inbox';
+import { Leads } from './views/Leads';
 import { HarvestPill } from './components/HarvestPill';
 import { Settings } from './views/Settings';
 import { Reports } from './views/Reports';
@@ -21,6 +22,7 @@ const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
   { v: 'inbox', icon: '✋', label: 'Needs you', key: 'i' },
   { v: 'office', icon: '🏢', label: 'Office', key: 'o' },
   { v: 'board', icon: '📋', label: 'Board', key: 'b' },
+  { v: 'leads', icon: '🎯', label: 'Leads', key: 'd' },
   { v: 'reports', icon: '📊', label: 'Reports', key: 'r' },
   { v: 'agents', icon: '🤖', label: 'Agents', key: 'a' },
   { v: 'rules', icon: '📐', label: 'House rules', key: 'h' },
@@ -107,6 +109,7 @@ export function App() {
   }), [f.onNotice, browserOn, go]);
 
   const awaiting = f.needsYou.length;
+  const newLeads = f.leads.filter((l) => l.status === 'new').length;
   const title = NAV.find((n) => n.v === view)?.label;
 
   return (
@@ -120,7 +123,9 @@ export function App() {
           {NAV.map((n) => (
             <button key={n.v} className={`nav-btn ${view === n.v ? 'active' : ''}`} onClick={() => go(n.v)}>
               <span>{n.icon}</span> {n.label}
-              {n.v === 'inbox' && awaiting > 0 ? <span className="count" title="Waiting on you">{awaiting}</span> : <kbd>g {n.key}</kbd>}
+              {n.v === 'inbox' && awaiting > 0 ? <span className="count" title="Waiting on you">{awaiting}</span>
+                : n.v === 'leads' && newLeads > 0 ? <span className="count" title="New leads">{newLeads}</span>
+                : <kbd>g {n.key}</kbd>}
             </button>
           ))}
           <div className="spacer" />
@@ -150,6 +155,7 @@ export function App() {
                 {view === 'inbox' && <Inbox />}
                 {view === 'office' && <Office />}
                 {view === 'board' && <Board filter={filter} />}
+                {view === 'leads' && <Leads />}
                 {view === 'reports' && <Reports />}
                 {view === 'rules' && <Rules />}
                 {view === 'agents' && <Agents />}

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createFactory, type FactoryOptions } from '../src/app.js';
 import { seeded, type MockOptions } from '../src/agents/mock.js';
 import type { Settings, Stage, Ticket } from '../src/types.js';
+import type { ScoutOptions } from '../src/leads/scouts.js';
 
 export function tmpData(name = 'db.json') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'factory-test-'));
@@ -16,13 +17,15 @@ export type TestFactory = ReturnType<typeof createFactory>;
  * A simulated factory that runs ~300× faster than the demo, with seeded randomness
  * and (by default) agents that always succeed. Override outcomes per test.
  */
-export function makeFactory(opts: { mock?: MockOptions; settings?: Partial<Settings>; dataFile?: string; speed?: number } = {}) {
+export function makeFactory(opts: { mock?: MockOptions; settings?: Partial<Settings>; dataFile?: string; speed?: number; leads?: ScoutOptions } = {}) {
   const factory = createFactory({
     dataFile: opts.dataFile ?? tmpData(),
     mode: 'mock',
     serveWeb: false,
     schedules: false,
     speed: opts.speed ?? 0.01,
+    // tests never touch the real web
+    leads: { fetchJson: async () => ({}), ...opts.leads },
     mock: {
       speed: 0.003,
       random: seeded(42),

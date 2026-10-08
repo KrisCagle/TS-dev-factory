@@ -34,7 +34,7 @@ export interface Prefs {
   };
 }
 
-export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'reports' | 'rules' | 'settings';
+export type View = 'inbox' | 'board' | 'office' | 'leads' | 'agents' | 'activity' | 'reports' | 'rules' | 'settings';
 
 export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed'];
 

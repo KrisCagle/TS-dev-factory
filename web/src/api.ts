@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
+import type { AgentConfig, AgentRole, AttentionItem, CaseVerdict, Lead, LeadProfile, LeadStatus, LogEvent, ScoutRun, ScoutStatus, Settings, Ticket, TicketSource } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -69,6 +69,7 @@ export interface ServerState {
   stats: Stats;
   connectors: Array<{ source: TicketSource; label: string; enabled: boolean }>;
   hasApiKey: boolean;
+  leads: { items: Lead[]; profile: LeadProfile; scouts: ScoutStatus };
 }
 
 export const api = {
@@ -111,4 +112,11 @@ export const api = {
   timerStart: (id: string, reason?: string) => req('POST', `/api/tickets/${id}/timer/start`, { reason }),
   timerStop: (id: string) => req<{ hours?: number }>('POST', `/api/tickets/${id}/timer/stop`),
   logTime: (id: string, hours: number, notes?: string) => req('POST', `/api/tickets/${id}/time`, { hours, notes }),
+  leads: () => req<{ items: Lead[]; profile: LeadProfile; scouts: ScoutStatus; runs: ScoutRun[] }>('GET', '/api/leads'),
+  runScouts: () => req<ScoutStatus>('POST', '/api/leads/run'),
+  updateLead: (id: string, patch: { status?: LeadStatus; company?: string }) => req<Lead>('PATCH', `/api/leads/${id}`, patch),
+  winLead: (id: string, projectId?: string) => req<Lead>('POST', `/api/leads/${id}/win`, { projectId }),
+  leadNote: (id: string, text: string) => req<Lead>('POST', `/api/leads/${id}/notes`, { text }),
+  deleteLead: (id: string) => req('DELETE', `/api/leads/${id}`),
+  saveLeadProfile: (p: Partial<LeadProfile>) => req<LeadProfile>('PUT', '/api/leads/profile', p),
 };

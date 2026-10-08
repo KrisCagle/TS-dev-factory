@@ -66,7 +66,7 @@ export class Orchestrator {
   private shuttingDown = false;
 
   /** Extension points used by other services (previews, artifacts). */
-  hooks: { rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
+  hooks: { onAttentionResolved?: (item: AttentionItem, option?: string) => void; rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
 
   constructor(private store: Store, private harvest: HarvestService, opts: OrchestratorOptions = {}) {
     this.mock = new MockRunner(opts.mock);
@@ -202,6 +202,7 @@ export class Orchestrator {
 
     if (!t) {
       done();
+      this.hooks.onAttentionResolved?.(item, option);
       return;
     }
     const kind = item.key.split(':')[0];

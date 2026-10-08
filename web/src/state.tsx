@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { api, type FactoryStatus, type ServerState, type Stats } from './api';
-import type { AgentConfig, AttentionItem, LogEvent, Project, Settings, Ticket } from './types';
+import type { AgentConfig, AttentionItem, Lead, LeadProfile, LogEvent, Project, ScoutStatus, Settings, Ticket } from './types';
 import { usePrefs } from './prefs';
 
 export interface Notice { event: string; title: string; body: string; ticketId?: string }
@@ -27,6 +27,9 @@ interface FactoryState {
   connectors: ServerState['connectors'];
   hasApiKey: boolean;
   logs: LogEvent[];
+  leads: Lead[];
+  leadProfile: LeadProfile | null;
+  scouts: ScoutStatus | null;
   /** subscribe to raw log events (used by the office for speech bubbles) */
   onLog: (fn: (e: LogEvent) => void) => () => void;
   refresh: () => Promise<void>;
@@ -97,6 +100,18 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
           case 'stats':
             setS((p) => p && { ...p, stats: msg.stats });
             break;
+          case 'lead':
+            setS((p) => p && { ...p, leads: { ...p.leads, items: upsert(p.leads.items, msg.lead) } });
+            break;
+          case 'leadDeleted':
+            setS((p) => p && { ...p, leads: { ...p.leads, items: p.leads.items.filter((l) => l.id !== msg.id) } });
+            break;
+          case 'leadProfile':
+            setS((p) => p && { ...p, leads: { ...p.leads, profile: msg.profile } });
+            break;
+          case 'scouts':
+            setS((p) => p && { ...p, leads: { ...p.leads, scouts: msg.scouts } });
+            break;
         }
       };
     };
@@ -114,7 +129,7 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
     const all = s?.tickets ?? [];
     const tickets = project ? all.filter((t) => t.projectId === project.id) : all;
     const ids = new Set(tickets.map((t) => t.id));
-    const attention = (s?.attention ?? []).filter((a) => !project || (a.ticketId && ids.has(a.ticketId)));
+    const attention = (s?.attention ?? []).filter((a) => !project || !a.ticketId || ids.has(a.ticketId));
     return {
       ready: !!s,
       connected,
@@ -136,6 +151,9 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
       connectors: s?.connectors ?? [],
       hasApiKey: s?.hasApiKey ?? false,
       logs: project ? logs.filter((l) => ids.has(l.ticketId)) : logs,
+      leads: s?.leads?.items ?? [],
+      leadProfile: s?.leads?.profile ?? null,
+      scouts: s?.leads?.scouts ?? null,
       onLog: (fn) => {
         listeners.current.add(fn);
         return () => listeners.current.delete(fn);
@@ -147,7 +165,7 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }
 
-function upsert(ts: Ticket[], t: Ticket) {
+function upsert<T extends { id: string }>(ts: T[], t: T) {
   const i = ts.findIndex((x) => x.id === t.id);
   if (i < 0) return [...ts, t];
   const next = ts.slice();

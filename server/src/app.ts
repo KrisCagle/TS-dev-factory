@@ -16,6 +16,9 @@ import { Rules } from './rules.js';
 import { Scoper } from './scoper.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
+import { LeadScouts, type ScoutOptions } from './leads/scouts.js';
+import { LeadStore } from './leads/store.js';
+import { LEAD_STATUSES, type LeadProfile, type LeadStatus } from './leads/types.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
 import type { MockOptions } from './agents/mock.js';
 
@@ -34,8 +37,10 @@ export interface FactoryOptions {
   speed?: number;
   /** Serve the built web UI (default true). */
   serveWeb?: boolean;
-  /** Post the daily standup on schedule (default true). */
+  /** Post the daily standup and run lead scouts on schedule (default true). */
   schedules?: boolean;
+  /** Lead scout knobs (sources, fetcher, classifier), used by tests. */
+  leads?: ScoutOptions;
 }
 
 /** Builds the whole factory — store, orchestrator, services, REST + WebSocket API — without listening yet. */
@@ -57,7 +62,10 @@ export function createFactory(opts: FactoryOptions) {
   let broadcastLate: (msg: unknown) => void = () => undefined;
   const notifier = new Notifier(store, (m) => broadcastLate(m));
   const reports = new Reports(store, notifier);
+  const leadStore = new LeadStore(store.dataDir);
+  const scouts = new LeadScouts(store, leadStore, opts.leads);
   orch.hooks = {
+    onAttentionResolved: (item, option) => { scouts.onAttentionResolved(item, option); },
     rulesFor: (projectId) => rules.forPrompt(projectId),
     onFinished: (ticketId) => previews.stop(ticketId),
     afterTester: (ticketId, cwd) => artifacts.collect(ticketId, cwd),
@@ -105,6 +113,7 @@ export function createFactory(opts: FactoryOptions) {
     stats: stats(),
     connectors: CONNECTORS.map((c) => ({ source: c.source, label: c.label, enabled: c.isEnabled(store.settings()) })),
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+    leads: { items: leadStore.leads(), profile: leadStore.profile(), scouts: scouts.status() },
   })));
 
   app.get('/api/logs', wrap((req) => store.logs(undefined, Number(req.query.limit ?? 300))));
@@ -200,6 +209,44 @@ export function createFactory(opts: FactoryOptions) {
   app.get('/api/attention', wrap(() => store.attention()));
   app.post('/api/attention/:id/resolve', wrap((req) => orch.resolve(req.params.id, req.body ?? {})));
 
+  // ---------------------------------------------------------------- lead scouts (the sales desk)
+  const lead404 = (id: string) => {
+    if (!leadStore.lead(id)) throw Object.assign(new Error('Lead not found'), { status: 404 });
+  };
+  app.get('/api/leads', wrap(() => ({ items: leadStore.leads(), profile: leadStore.profile(), scouts: scouts.status(), runs: leadStore.runs().slice(-10) })));
+  app.post('/api/leads/run', wrap(() => {
+    scouts.run().catch((err) => console.error('[leads] run failed:', err));
+    return scouts.status();
+  }));
+  app.put('/api/leads/profile', wrap((req) => {
+    const p = req.body as Partial<LeadProfile>;
+    if (p.lines && (!Array.isArray(p.lines) || p.lines.some((l) => !l?.id || !l?.name))) throw Object.assign(new Error('Every service line needs an id and a name'), { status: 400 });
+    if (p.inboxThreshold !== undefined && !(Number(p.inboxThreshold) >= 0 && Number(p.inboxThreshold) <= 100)) throw Object.assign(new Error('inboxThreshold must be 0–100'), { status: 400 });
+    return leadStore.updateProfile(p);
+  }));
+  app.patch('/api/leads/:id', wrap((req) => {
+    lead404(req.params.id);
+    const { status, company } = req.body as { status?: LeadStatus; company?: string };
+    if (company !== undefined) leadStore.updateLead(req.params.id, { company: String(company).trim() || undefined });
+    if (status !== undefined) {
+      if (!LEAD_STATUSES.includes(status)) throw Object.assign(new Error(`status must be one of ${LEAD_STATUSES.join(', ')}`), { status: 400 });
+      return scouts.setStatus(req.params.id, status);
+    }
+    return leadStore.lead(req.params.id);
+  }));
+  app.post('/api/leads/:id/win', wrap((req) => scouts.win(req.params.id, req.body?.projectId)));
+  app.post('/api/leads/:id/notes', wrap((req) => {
+    lead404(req.params.id);
+    const text = String(req.body?.text ?? '').trim();
+    if (!text) throw Object.assign(new Error('text is required'), { status: 400 });
+    return leadStore.addNote(req.params.id, text);
+  }));
+  app.delete('/api/leads/:id', wrap((req) => {
+    lead404(req.params.id);
+    scouts.setStatus(req.params.id, 'passed');
+    leadStore.deleteLead(req.params.id);
+  }));
+
   // ---------------------------------------------------------------- Harvest
   app.get('/api/harvest/status', wrap((req) => harvestSvc.status(req.query.force === '1')));
   app.get('/api/harvest/projects', wrap(() => harvest.projects(store.settings())));
@@ -292,6 +339,11 @@ export function createFactory(opts: FactoryOptions) {
   store.on('settings', (settings) => broadcast({ type: 'settings', settings }));
   store.on('factory', (factory) => broadcast({ type: 'factory', factory }));
   store.on('attention', (attention) => { broadcast({ type: 'attention', attention }); pushStats(); });
+  leadStore.on('lead', (lead) => broadcast({ type: 'lead', lead }));
+  leadStore.on('leadDeleted', (id) => broadcast({ type: 'leadDeleted', id }));
+  leadStore.on('profile', (profile) => broadcast({ type: 'leadProfile', profile }));
+  leadStore.on('scouts', (status) => broadcast({ type: 'scouts', scouts: status }));
+  leadStore.on('run', () => broadcast({ type: 'scouts', scouts: scouts.status() }));
 
   let started = false;
   return {
@@ -299,13 +351,18 @@ export function createFactory(opts: FactoryOptions) {
     server,
     store,
     orch,
+    leads: leadStore,
+    scouts,
     /** Start listening and start the agents' scheduler. Resolves with the bound port. */
     listen(port: number) {
       return new Promise<number>((resolve) => {
         server.listen(port, () => {
           started = true;
           orch.start();
-          if (opts.schedules !== false) reports.startSchedule();
+          if (opts.schedules !== false) {
+            reports.startSchedule();
+            scouts.startSchedule();
+          }
           resolve((server.address() as { port: number }).port);
         });
       });
@@ -315,6 +372,8 @@ export function createFactory(opts: FactoryOptions) {
       orch.stop();
       previews.stopAll();
       reports.stopSchedule();
+      scouts.stopSchedule();
+      leadStore.flush();
       for (const c of wss.clients) c.terminate();
       wss.close();
       store.flush();

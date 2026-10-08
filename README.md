@@ -36,6 +36,13 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Ticket sources**: a built-in board plus **GitHub Issues, Linear and Jira**. Imported tickets land in Backlog, and progress is sent back as comments and status changes.
 - **Shipping**: on approval, merge locally, open a GitHub PR, or leave the branch. Set per project.
 
+### Finding the work 🎯
+
+- **Lead scouts**: scouts read public posts on Hacker News and Reddit for companies that might pay you to build, rescue or maintain their software. A keyword pass keeps the cost down, then Claude decides whether each post is a real buying signal, which of your service lines it fits, and a one-line opening for outreach.
+- **Leads view**: a ranked list with the post, what they need, the score, and your notes. Move leads through New → Reviewing → Contacted, or pass. **Won** creates a kickoff ticket in the Backlog.
+- **Hot leads come to you**: anything scoring above your threshold lands in Needs you with Pursue/Pass.
+- **Your profile stays local**: your agency, service lines, phrases, weights and every lead are saved in the data folder (`.factory/lead-profile.json`, `.factory/leads.json`), never in the repo. Run on demand or on a schedule.
+
 ### Staying in the loop
 
 - **Notifications** 🔔: Mac, browser and Slack pings when something needs you, CI fails, an agent is stuck, or a ticket ships or fails. Every channel and event can be switched off, with quiet hours.
