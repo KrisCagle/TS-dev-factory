@@ -113,7 +113,7 @@ export function createFactory(opts: FactoryOptions) {
     stats: stats(),
     connectors: CONNECTORS.map((c) => ({ source: c.source, label: c.label, enabled: c.isEnabled(store.settings()) })),
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
-    leads: { items: leadStore.leads(), profile: leadStore.profile(), scouts: scouts.status() },
+    leads: { items: leadStore.leads(), profile: leadStore.publicProfile(), scouts: scouts.status() },
   })));
 
   app.get('/api/logs', wrap((req) => store.logs(undefined, Number(req.query.limit ?? 300))));
@@ -213,7 +213,7 @@ export function createFactory(opts: FactoryOptions) {
   const lead404 = (id: string) => {
     if (!leadStore.lead(id)) throw Object.assign(new Error('Lead not found'), { status: 404 });
   };
-  app.get('/api/leads', wrap(() => ({ items: leadStore.leads(), profile: leadStore.profile(), scouts: scouts.status(), runs: leadStore.runs().slice(-10) })));
+  app.get('/api/leads', wrap(() => ({ items: leadStore.leads(), profile: leadStore.publicProfile(), scouts: scouts.status(), runs: leadStore.runs().slice(-10) })));
   app.post('/api/leads/run', wrap(() => {
     scouts.run().catch((err) => console.error('[leads] run failed:', err));
     return scouts.status();

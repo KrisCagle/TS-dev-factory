@@ -63,7 +63,7 @@ export function Leads() {
         </select>
         <span className="grow" />
         <span className="small muted">
-          {scouts?.running ? 'Scouting…' : last ? `Last run ${ago(last.startedAt)} ago · ${last.created} new from ${last.fetched} posts` : 'Never run'}
+          {scouts?.running ? 'Scouting…' : last ? `Last run ${ago(last.startedAt)} ago · ${last.created} new from ${last.fetched} posts${last.skipped?.length ? ` · ${last.skipped.join(', ')} not due yet` : ''}` : 'Never run'}
           {scouts?.nextRunAt && !scouts.running ? ` · next in ${scouts.nextRunAt > Date.now() ? until(scouts.nextRunAt) : 'a minute'}` : ''}
         </span>
         <button className="btn" onClick={() => setEditing(true)}>⚙ Lead profile</button>
@@ -219,6 +219,8 @@ function ProfileEditor({ profile, onClose }: { profile: LeadProfile; onClose: ()
   const [p, setP] = useState<LeadProfile>(() => structuredClone(profile));
   const [busy, setBusy] = useState(false);
   const set = (patch: Partial<LeadProfile>) => setP((x) => ({ ...x, ...patch }));
+  const setSrc = <K extends keyof LeadProfile['sources']>(k: K, patch: Partial<LeadProfile['sources'][K]>) =>
+    setP((x) => ({ ...x, sources: { ...x.sources, [k]: { ...x.sources[k], ...patch } } }));
   const setLine = (i: number, patch: Partial<ServiceLine>) => setP((x) => ({ ...x, lines: x.lines.map((l, j) => (j === i ? { ...l, ...patch } : l)) }));
 
   const save = async () => {
@@ -287,6 +289,7 @@ function ProfileEditor({ profile, onClose }: { profile: LeadProfile; onClose: ()
 
       <div className="card section" style={{ marginTop: 12 }}>
         <h2>Where scouts look</h2>
+        <div className="small muted" style={{ marginBottom: 10 }}>Forums, where founders ask for help in public:</div>
         <div className="row"><Toggle on={p.sources.hackernews.enabled} onChange={(v) => set({ sources: { ...p.sources, hackernews: { ...p.sources.hackernews, enabled: v } } })} /><strong>Hacker News</strong><span className="small muted">stories and comments, via the public Algolia API</span></div>
         <label className="lead-field"><span className="small muted">Searches</span><textarea className="textarea mono small" rows={2} value={p.sources.hackernews.queries.join(', ')} onChange={(e) => set({ sources: { ...p.sources, hackernews: { ...p.sources.hackernews, queries: list(e.target.value) } } })} /></label>
         <div className="row" style={{ marginTop: 10 }}><Toggle on={p.sources.reddit.enabled} onChange={(v) => set({ sources: { ...p.sources, reddit: { ...p.sources.reddit, enabled: v } } })} /><strong>Reddit</strong><span className="small muted">public search across these subreddits</span></div>
@@ -294,7 +297,21 @@ function ProfileEditor({ profile, onClose }: { profile: LeadProfile; onClose: ()
           <label className="lead-field"><span className="small muted">Subreddits</span><textarea className="textarea mono small" rows={2} value={p.sources.reddit.subreddits.join(', ')} onChange={(e) => set({ sources: { ...p.sources, reddit: { ...p.sources.reddit, subreddits: list(e.target.value) } } })} /></label>
           <label className="lead-field"><span className="small muted">Searches</span><textarea className="textarea mono small" rows={2} value={p.sources.reddit.queries.join(', ')} onChange={(e) => set({ sources: { ...p.sources, reddit: { ...p.sources.reddit, queries: list(e.target.value) } } })} /></label>
         </div>
-        <label className="lead-field" style={{ marginTop: 10 }}><span className="small muted">Skip posts that mention</span><textarea className="textarea mono small" rows={2} value={p.excludeKeywords.join(', ')} onChange={(e) => set({ excludeKeywords: list(e.target.value) })} /></label>
+        <div className="small muted" style={{ margin: '18px 0 10px' }}>Job boards and contracts, where companies already pay for outside help:</div>
+        <div className="row"><Toggle on={p.sources.hnHiring.enabled} onChange={(v) => setSrc('hnHiring', { enabled: v })} /><strong>HN “Who is hiring?”</strong><span className="small muted">the monthly thread; keeps company posts that mention these</span></div>
+        <label className="lead-field"><span className="small muted">Keep posts that mention</span><textarea className="textarea mono small" rows={2} value={p.sources.hnHiring.phrases.join(', ')} onChange={(e) => setSrc('hnHiring', { phrases: list(e.target.value) })} /></label>
+
+        <div className="row" style={{ marginTop: 14 }}><Toggle on={p.sources.remotive.enabled} onChange={(v) => setSrc('remotive', { enabled: v })} /><strong>Remotive</strong><span className="small muted">contract and freelance software roles · checked at most every 6 hours, as Remotive asks</span></div>
+        <div className="row" style={{ marginTop: 10 }}><Toggle on={p.sources.remoteok.enabled} onChange={(v) => setSrc('remoteok', { enabled: v })} /><strong>RemoteOK</strong><span className="small muted">contract and freelance developer roles · checked at most every 6 hours</span></div>
+
+        <div className="row" style={{ marginTop: 14 }}><Toggle on={p.sources.samgov.enabled} onChange={(v) => setSrc('samgov', { enabled: v })} /><strong>SAM.gov</strong><span className="small muted">federal solicitations for custom software · checked once a day to fit the free API quota</span></div>
+        <div className="grid2">
+          <label className="lead-field"><span className="small muted">API key (SAM.gov → Account details → Public API key)</span><input className="input mono" type="password" autoComplete="off" value={p.sources.samgov.apiKey} placeholder="Paste your key" onChange={(e) => setSrc('samgov', { apiKey: e.target.value.trim() })} /></label>
+          <label className="lead-field"><span className="small muted">NAICS codes</span><input className="input mono" value={p.sources.samgov.naics.join(', ')} onChange={(e) => setSrc('samgov', { naics: list(e.target.value) })} /></label>
+        </div>
+        {p.sources.samgov.enabled && !p.sources.samgov.apiKey && <div className="small" style={{ color: 'var(--warn)', marginTop: 6 }}>Add an API key, or SAM.gov is skipped.</div>}
+
+        <label className="lead-field" style={{ marginTop: 14 }}><span className="small muted">Skip posts that mention</span><textarea className="textarea mono small" rows={2} value={p.excludeKeywords.join(', ')} onChange={(e) => set({ excludeKeywords: list(e.target.value) })} /></label>
       </div>
     </div>
   );

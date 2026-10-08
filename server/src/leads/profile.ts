@@ -67,6 +67,20 @@ export const DEFAULT_PROFILE: LeadProfile = {
       subreddits: ['startups', 'SaaS', 'Entrepreneur', 'smallbusiness', 'forhire', 'nocode', 'Bubbleio', 'cofounder'],
       queries: ['developer', 'agency', 'mvp', 'take over app', 'technical cofounder'],
     },
+    hnHiring: {
+      enabled: true,
+      phrases: ['contract', 'contractor', 'freelance', 'part-time', 'part time', 'fractional', 'agency', 'founding engineer', 'first engineer', 'first hire', 'solo founder', 'non-technical founder'],
+    },
+    remotive: { enabled: true },
+    remoteok: { enabled: true },
+    samgov: {
+      enabled: false,
+      apiKey: '',
+      // 541511 custom computer programming, 541512 computer systems design
+      naics: ['541511', '541512'],
+      // o solicitation, k combined synopsis/solicitation, r sources sought, p presolicitation
+      noticeTypes: ['o', 'k', 'r', 'p'],
+    },
   },
   schedule: { enabled: false, everyHours: 6 },
   inboxThreshold: 75,
@@ -85,7 +99,20 @@ export function mergeProfile(saved?: Partial<LeadProfile>): LeadProfile {
     sources: {
       hackernews: { ...d.sources.hackernews, ...(saved.sources?.hackernews ?? {}) },
       reddit: { ...d.sources.reddit, ...(saved.sources?.reddit ?? {}) },
+      hnHiring: { ...d.sources.hnHiring, ...(saved.sources?.hnHiring ?? {}) },
+      remotive: { ...d.sources.remotive, ...(saved.sources?.remotive ?? {}) },
+      remoteok: { ...d.sources.remoteok, ...(saved.sources?.remoteok ?? {}) },
+      samgov: { ...d.sources.samgov, ...(saved.sources?.samgov ?? {}) },
     },
     schedule: { ...d.schedule, ...(saved.schedule ?? {}) },
   };
+}
+
+export const MASK = '••••••••';
+
+/** The profile for the browser: the SAM.gov key never leaves the server. */
+export function publicProfile(p: LeadProfile): LeadProfile {
+  const out = structuredClone(p);
+  if (out.sources.samgov.apiKey) out.sources.samgov.apiKey = MASK;
+  return out;
 }

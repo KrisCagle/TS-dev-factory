@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mergeProfile } from './profile.js';
+import { MASK, mergeProfile, publicProfile } from './profile.js';
 import type { Lead, LeadProfile, LeadsDB, ScoutRun } from './types.js';
 
 const MAX_RUNS = 50;
@@ -36,11 +36,27 @@ export class LeadStore extends EventEmitter {
     return this.prof;
   }
 
+  publicProfile() {
+    return publicProfile(this.prof);
+  }
+
   updateProfile(patch: Partial<LeadProfile>) {
+    const key = this.prof.sources.samgov.apiKey;
     this.prof = mergeProfile({ ...this.prof, ...patch });
+    // a masked key coming back from the browser means "unchanged"
+    if (this.prof.sources.samgov.apiKey === MASK) this.prof.sources.samgov.apiKey = key;
     writeAtomic(this.profileFile, this.prof);
-    this.emit('profile', this.prof);
-    return this.prof;
+    this.emit('profile', this.publicProfile());
+    return this.publicProfile();
+  }
+
+  lastFetched(source: string) {
+    return this.db.lastFetched?.[source] ?? 0;
+  }
+
+  markFetched(source: string, at = Date.now()) {
+    (this.db.lastFetched ??= {})[source] = at;
+    this.scheduleSave();
   }
 
   // ---------- leads ----------

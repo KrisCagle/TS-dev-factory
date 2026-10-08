@@ -72,8 +72,14 @@ export class LeadScouts {
     const raw: RawItem[] = [];
     for (const src of this.sources) {
       if (!src.isEnabled(profile)) continue;
+      const due = this.leads.lastFetched(src.id) + (src.minIntervalHours ?? 0) * 3_600_000;
+      if (this.now() < due) {
+        (run.skipped ??= []).push(src.label);
+        continue;
+      }
       try {
         raw.push(...(await src.fetch(profile, since, this.fetchJson)));
+        this.leads.markFetched(src.id, this.now());
       } catch (err) {
         run.errors.push(`${src.label}: ${(err as Error).message}`);
       }
@@ -118,7 +124,7 @@ export class LeadScouts {
         title: item.title,
         excerpt: shorten(item.text, 1200),
         author: item.author,
-        company: c.company,
+        company: c.company ?? item.company,
         lineId: c.lineId,
         summary: c.summary,
         angle: c.angle,

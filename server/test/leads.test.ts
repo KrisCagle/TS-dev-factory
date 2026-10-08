@@ -56,6 +56,16 @@ function fakeWeb(): { fetchJson: FetchJson; calls: string[] } {
   return { fetchJson, calls };
 }
 
+/** Every source switched off; tests turn on the ones they exercise. */
+const OFF = {
+  hackernews: { enabled: false, queries: [] },
+  reddit: { enabled: false, subreddits: [], queries: [] },
+  hnHiring: { ...DEFAULT_PROFILE.sources.hnHiring, enabled: false },
+  remotive: { enabled: false },
+  remoteok: { enabled: false },
+  samgov: { ...DEFAULT_PROFILE.sources.samgov, enabled: false },
+};
+
 let f: TestFactory | undefined;
 afterEach(async () => {
   await f?.close();
@@ -67,7 +77,7 @@ function factoryWithWeb() {
   f = makeFactory({ leads: { fetchJson: web.fetchJson, now: () => NOW } });
   // one query per source keeps the fixtures from being fetched several times
   f.leads.updateProfile({
-    sources: { hackernews: { enabled: true, queries: ['developer'] }, reddit: { enabled: true, subreddits: ['startups', 'forhire'], queries: ['developer'] } },
+    sources: { ...OFF, hackernews: { enabled: true, queries: ['developer'] }, reddit: { enabled: true, subreddits: ['startups', 'forhire'], queries: ['developer'] } },
     inboxThreshold: 60,
   });
   return { f, web };
@@ -151,7 +161,7 @@ describe('scout run', () => {
     f = makeFactory({
       leads: { now: () => NOW, fetchJson: (url, init) => (url.includes('reddit') ? Promise.reject(new Error('www.reddit.com answered 429')) : web.fetchJson(url, init)) },
     });
-    f.leads.updateProfile({ sources: { hackernews: { enabled: true, queries: ['developer'] }, reddit: { enabled: true, subreddits: ['startups'], queries: ['developer'] } } });
+    f.leads.updateProfile({ sources: { ...OFF, hackernews: { enabled: true, queries: ['developer'] }, reddit: { enabled: true, subreddits: ['startups'], queries: ['developer'] } } });
     const run = await f.scouts.run();
     expect(run.errors).toEqual(['Reddit: www.reddit.com answered 429']);
     expect(run.created).toBe(1);
@@ -218,5 +228,118 @@ describe('leads API', () => {
     const r = (await request(f.app).put('/api/leads/profile').send({ agencyName: 'Acme Dev', inboxThreshold: 80 }).expect(200)).body;
     expect(r).toMatchObject({ agencyName: 'Acme Dev', inboxThreshold: 80 });
     expect(f.leads.profile().agencyName).toBe('Acme Dev');
+  });
+});
+
+// ---------------------------------------------------------------- professional sources
+
+const day = (n: number) => NOW - n * 86_400_000;
+const iso = (ts: number) => new Date(ts).toISOString();
+
+function proWeb(): { fetchJson: FetchJson; calls: string[] } {
+  const calls: string[] = [];
+  const fetchJson: FetchJson = async (url) => {
+    calls.push(url);
+    if (url.includes('author_whoishiring')) return { hits: [{ objectID: '900', title: 'Ask HN: Who is hiring? (October 2026)' }] };
+    if (url.includes('/api/v1/items/900')) {
+      return {
+        id: 900, title: 'Ask HN: Who is hiring? (October 2026)', created_at_i: hoursAgo(100),
+        children: [
+          { id: 901, author: 'a', created_at_i: hoursAgo(90), text: 'Lumen Health | Nashville | CONTRACT | React Native<p>Looking for contractors to help ship our patient app.' },
+          { id: 902, author: 'b', created_at_i: hoursAgo(90), text: 'BigCo | SF | Full-time | Staff engineer<p>Join our 400-person team.' },
+          { id: 903, author: 'c', created_at_i: hoursAgo(80), text: 'Tiny Startup | Remote | Founding engineer<p>Solo founder, seed funded, need our first engineer to build the MVP.' },
+        ],
+      };
+    }
+    if (url.includes('remotive.com')) {
+      return {
+        jobs: [
+          { id: 1, url: 'https://remotive.com/remote-jobs/software-dev/rails-1', title: 'Rails Developer', company_name: 'Acme Freight', job_type: 'contract', publication_date: iso(day(2)), description: '<p>6-month contract to maintain our Rails app.</p>' },
+          { id: 2, url: 'https://remotive.com/remote-jobs/software-dev/2', title: 'Senior Engineer', company_name: 'MegaCorp', job_type: 'full_time', publication_date: iso(day(2)), description: '<p>Join our platform team.</p>' },
+        ],
+      };
+    }
+    if (url.includes('remoteok.com')) {
+      return [
+        { legal: 'notice' },
+        { id: '77', epoch: Math.floor(day(1) / 1000), company: 'Shoply', position: 'Freelance React Developer', tags: ['react', 'contract'], description: 'Help us finish our storefront.', url: 'https://remoteok.com/remote-jobs/77' },
+        { id: '78', epoch: Math.floor(day(1) / 1000), company: 'Shoply', position: 'Customer Support Lead', tags: ['support', 'contract'], description: '', url: 'https://remoteok.com/remote-jobs/78' },
+      ];
+    }
+    if (url.includes('api.sam.gov')) {
+      if (url.includes('api_key=bad')) throw new Error(`api.sam.gov answered 403 for ${url}`);
+      return {
+        opportunitiesData: [
+          { noticeId: 'n1', title: 'Modernization and Sustainment of Grants Management System', fullParentPathName: 'AGRICULTURE, DEPARTMENT OF.FOREST SERVICE', postedDate: iso(day(3)).slice(0, 10), type: 'Sources Sought', typeOfSetAsideDescription: 'Total Small Business Set-Aside', responseDeadLine: iso(day(-10)), naicsCode: '541511' },
+          { noticeId: 'n2', title: 'Award: Laptop refresh', fullParentPathName: 'ARMY', postedDate: iso(day(3)).slice(0, 10), type: 'Award Notice', naicsCode: '541511' },
+        ],
+      };
+    }
+    throw new Error(`unexpected ${url}`);
+  };
+  return { fetchJson, calls };
+}
+
+function proFactory(sources: Partial<typeof OFF>) {
+  const web = proWeb();
+  f = makeFactory({ leads: { fetchJson: web.fetchJson, now: () => NOW } });
+  f.leads.updateProfile({ sources: { ...OFF, ...sources } as typeof DEFAULT_PROFILE.sources });
+  return { f, web };
+}
+
+describe('professional sources', () => {
+  it('reads the latest HN "Who is hiring?" thread for contract work and tiny teams', async () => {
+    const { f } = proFactory({ hnHiring: { ...DEFAULT_PROFILE.sources.hnHiring, enabled: true } });
+    const run = await f.scouts.run();
+    expect(run.fetched).toBe(2); // the 400-person full-time post is dropped at the source
+    const byKey = Object.fromEntries(f.leads.leads().map((l) => [l.dedupeKey, l]));
+    expect(byKey['hnHiring:901']).toMatchObject({ company: 'Lumen Health', lineId: 'staff' });
+    expect(byKey['hnHiring:903']).toMatchObject({ company: 'Tiny Startup', lineId: 'build' });
+  });
+
+  it('keeps contract developer roles from Remotive and RemoteOK, with a link back to the listing', async () => {
+    const { f } = proFactory({ remotive: { enabled: true }, remoteok: { enabled: true } });
+    await f.scouts.run();
+    const leads = f.leads.leads();
+    expect(leads.map((l) => l.dedupeKey).sort()).toEqual(['remoteok:77', 'remotive:1']);
+    expect(leads.find((l) => l.source === 'remotive')).toMatchObject({ company: 'Acme Freight', lineId: 'staff', where: 'Remotive', url: 'https://remotive.com/remote-jobs/software-dev/rails-1' });
+    expect(leads.find((l) => l.source === 'remoteok')).toMatchObject({ company: 'Shoply', where: 'RemoteOK' });
+  });
+
+  it('respects how often a source may be polled', async () => {
+    const { f, web } = proFactory({ remotive: { enabled: true } });
+    await f.scouts.run();
+    const second = await f.scouts.run();
+    expect(second.skipped).toEqual(['Remotive']);
+    expect(web.calls.filter((u) => u.includes('remotive'))).toHaveLength(1);
+  });
+
+  it('finds SAM.gov solicitations for software work and sorts maintenance into rescue', async () => {
+    const { f, web } = proFactory({ samgov: { ...DEFAULT_PROFILE.sources.samgov, enabled: true, apiKey: 'k3y', naics: ['541511'] } });
+    await f.scouts.run();
+    expect(web.calls[0]).toContain('ncode=541511');
+    expect(web.calls[0]).toContain('postedTo=10/08/2026');
+    const [lead] = f.leads.leads();
+    expect(f.leads.leads()).toHaveLength(1); // the award notice is not an opportunity
+    expect(lead).toMatchObject({ lineId: 'rescue', where: 'SAM.gov', company: 'AGRICULTURE, DEPARTMENT OF', url: 'https://sam.gov/opp/n1/view' });
+    expect(lead.excerpt).toContain('Total Small Business Set-Aside');
+  });
+
+  it('is skipped without a key, and never leaks the key', async () => {
+    const { f, web } = proFactory({ samgov: { ...DEFAULT_PROFILE.sources.samgov, enabled: true, apiKey: '' } });
+    await f.scouts.run();
+    expect(web.calls).toHaveLength(0);
+
+    f.leads.updateProfile({ sources: { ...f.leads.profile().sources, samgov: { ...DEFAULT_PROFILE.sources.samgov, enabled: true, apiKey: 'bad' } } });
+    const run = await f.scouts.run();
+    expect(run.errors[0]).toContain('SAM.gov');
+    expect(run.errors[0]).not.toContain('bad');
+
+    const api = request(f.app);
+    const shown = (await api.get('/api/leads').expect(200)).body.profile.sources.samgov.apiKey;
+    expect(shown).not.toBe('bad');
+    // saving the masked value back keeps the real key
+    await api.put('/api/leads/profile').send({ sources: { ...f.leads.profile().sources, samgov: { ...f.leads.profile().sources.samgov, apiKey: shown } } }).expect(200);
+    expect(f.leads.profile().sources.samgov.apiKey).toBe('bad');
   });
 });

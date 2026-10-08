@@ -38,7 +38,7 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 
 ### Finding the work 🎯
 
-- **Lead scouts**: scouts read public posts on Hacker News and Reddit for companies that might pay you to build, rescue or maintain their software. A keyword pass keeps the cost down, then Claude decides whether each post is a real buying signal, which of your service lines it fits, and a one-line opening for outreach.
+- **Lead scouts**: scouts read public posts on Hacker News and Reddit, the monthly HN "Who is hiring?" thread, contract roles on Remotive and RemoteOK, and federal solicitations on SAM.gov (free API key) for companies that might pay you to build, rescue or maintain their software. A keyword pass keeps the cost down, then Claude decides whether each post is a real buying signal, which of your service lines it fits, and a one-line opening for outreach.
 - **Leads view**: a ranked list with the post, what they need, the score, and your notes. Move leads through New → Reviewing → Contacted, or pass. **Won** creates a kickoff ticket in the Backlog.
 - **Hot leads come to you**: anything scoring above your threshold lands in Needs you with Pursue/Pass.
 - **Your profile stays local**: your agency, service lines, phrases, weights and every lead are saved in the data folder (`.factory/lead-profile.json`, `.factory/leads.json`), never in the repo. Run on demand or on a schedule.

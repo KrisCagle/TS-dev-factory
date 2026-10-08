@@ -28,6 +28,8 @@ export function prefilter(item: RawItem, profile: LeadProfile): Prefilter {
   for (const line of profile.lines) {
     if (!line.enabled) continue;
     const found = line.keywords.filter((k) => hasPhrase(text, k));
+    // job boards and RFPs already imply a service line, so they don't need a phrase to get through
+    if (item.hint === line.id) found.unshift(`${item.kind ?? 'source'}: ${item.where ?? item.source}`);
     if (found.length) hits[line.id] = found;
   }
   return { keep: Object.keys(hits).length > 0, hits };
@@ -54,13 +56,15 @@ export const heuristicClassifier: Classifier = {
         const s = hits.length * (line?.weight ?? 1);
         if (!best || s > best.s) best = { id, s, hits };
       }
-      const seeking = SEEKING.test(text);
+      // a contract listing or a solicitation is an ask by definition
+      const seeking = SEEKING.test(text) || item.kind === 'job' || item.kind === 'rfp';
       const line = profile.lines.find((l) => l.id === best?.id);
       const confidence = best ? Math.min(0.9, 0.3 + 0.12 * best.hits.length + (seeking ? 0.2 : 0)) : 0;
       const summary = firstSentence(item.text) || item.title;
       return {
         isLead: !!best && seeking,
         lineId: best?.id,
+        company: item.company,
         confidence: +confidence.toFixed(2),
         summary,
         angle: line ? `Saw your post about ${shorten(item.title, 60).toLowerCase()} — ${line.pitch.charAt(0).toLowerCase()}${line.pitch.slice(1)}` : '',
@@ -110,6 +114,11 @@ Not leads: people offering their own services, job seekers, students, unpaid/equ
 to code something themselves, tool or vendor promotions, and generic discussion with no need behind it.
 A full-time hiring post can still be a lead when the company clearly lacks a team (e.g. "our first engineer").
 
+Posts marked kind="job" are job listings: contract, freelance, part-time and fractional roles are leads for
+team enhancement (the company is already paying outside help). Posts marked kind="rfp" are government
+solicitations: they are leads when the work is custom software development, modernization or maintenance
+that a small agency could bid on; mention any set-aside and the response deadline in the summary.
+
 Confidence: 0.9+ only for an explicit ask for outside help with a clear project. 0.5 for a plausible need that
 isn't an ask yet. Below 0.3 when it's doubtful.
 
@@ -134,7 +143,8 @@ export class ClaudeClassifier implements Classifier {
       systemPrompt: systemPrompt(profile), allowedTools: [], maxTurns: 3,
     };
     const posts = items.map(({ item, pre }, index) => [
-      `<post index="${index}" where="${item.where ?? item.source}" posted="${new Date(item.postedAt).toISOString().slice(0, 10)}">`,
+      `<post index="${index}" kind="${item.kind ?? 'post'}" where="${item.where ?? item.source}" posted="${new Date(item.postedAt).toISOString().slice(0, 10)}">`,
+      ...(item.company ? [`Company: ${item.company}`] : []),
       `Title: ${item.title}`,
       shorten(item.text, 1800),
       `Matched phrases: ${Object.entries(pre.hits).map(([id, h]) => `${id}(${h.join(', ')})`).join('; ')}`,
@@ -159,7 +169,7 @@ export class ClaudeClassifier implements Classifier {
         isLead: Boolean(x.isLead) && !!lineId,
         lineId,
         confidence: clamp(Number(x.confidence) || 0, 0, 1),
-        company: String(x.company ?? '').trim() || undefined,
+        company: String(x.company ?? '').trim() || items[index].item.company,
         summary: String(x.summary ?? '').trim() || fallback[index].summary,
         angle: String(x.angle ?? '').trim(),
         budgetHint: (['none', 'low', 'mid', 'high'] as const).find((b) => b === budget),

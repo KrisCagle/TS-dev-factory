@@ -23,6 +23,13 @@ export interface LeadProfile {
   sources: {
     hackernews: { enabled: boolean; queries: string[] };
     reddit: { enabled: boolean; subreddits: string[]; queries: string[] };
+    /** The monthly "Ask HN: Who is hiring?" thread: company posts, kept when they mention contract work or a tiny team. */
+    hnHiring: { enabled: boolean; phrases: string[] };
+    /** Remote job boards with public APIs. Only contract/freelance roles (or ones matching your phrases) are kept. */
+    remotive: { enabled: boolean };
+    remoteok: { enabled: boolean };
+    /** Federal solicitations on SAM.gov. Needs a free API key from your SAM.gov account. */
+    samgov: { enabled: boolean; apiKey: string; naics: string[]; noticeTypes: string[] };
   };
   schedule: { enabled: boolean; everyHours: number };
   inboxThreshold: number;   // leads scoring at or above this go to the Needs you inbox
@@ -40,6 +47,11 @@ export interface RawItem {
   author?: string;
   postedAt: number;
   where?: string;           // e.g. "r/startups" or "Ask HN"
+  company?: string;         // when the source states it (job boards, SAM.gov)
+  /** What kind of signal this is: a forum post, a job listing, or a request for proposals. */
+  kind?: 'post' | 'job' | 'rfp';
+  /** Service line the source already implies (a contract job → team enhancement). */
+  hint?: string;
 }
 
 export interface Classification {
@@ -90,6 +102,7 @@ export interface ScoutRun {
   candidates: number;       // passed the keyword pre-filter
   created: number;
   errors: string[];
+  skipped?: string[];       // sources not due yet (their minimum interval hasn't passed)
 }
 
 export interface LeadsDB {
@@ -97,4 +110,6 @@ export interface LeadsDB {
   runs: ScoutRun[];
   /** Everything we've already looked at, so a rejected post isn't classified twice. */
   seen: Record<string, number>;
+  /** When each source was last fetched, so polite/quota-limited sources aren't polled too often. */
+  lastFetched?: Record<string, number>;
 }
