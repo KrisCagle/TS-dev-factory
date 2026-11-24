@@ -24,6 +24,7 @@ export interface Prefs {
   defaultView: View;
   knownColumns?: Stage[];
   activeProject: string;                              // 'all' or a project id
+  game: { enabled: boolean; celebrations: boolean; sound: boolean };
   office: {
     looks: Partial<Record<AgentRole | 'pm', CharacterLook>>;
     zones: Record<string, ZonePos>;                   // user-dragged zone positions
@@ -34,9 +35,9 @@ export interface Prefs {
   };
 }
 
-export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'reports' | 'rules' | 'settings';
+export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'reports' | 'rules' | 'trophies' | 'settings';
 
-export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed'];
+export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'done', 'failed'];
 
 const DEFAULTS: Prefs = {
   theme: 'system',
@@ -48,6 +49,7 @@ const DEFAULTS: Prefs = {
   groupBy: 'none',
   defaultView: 'office',
   activeProject: 'all',
+  game: { enabled: true, celebrations: true, sound: false },
   office: { looks: {}, zones: {}, showBubbles: true, showFeed: true, speed: 1, pmName: 'You' },
 };
 
@@ -63,8 +65,9 @@ function load(): Prefs {
       cardFields: { ...DEFAULTS.cardFields, ...raw.cardFields },
       widgets: { ...DEFAULTS.widgets, ...raw.widgets },
       office: { ...DEFAULTS.office, ...raw.office },
+      game: { ...DEFAULTS.game, ...raw.game },
       // add columns introduced after the prefs were saved, in their natural place
-      columns: ALL_COLUMNS.filter((c) => (raw.columns ?? ALL_COLUMNS).includes(c) || !(raw.knownColumns ?? ALL_COLUMNS.filter((x) => x !== 'ci')).includes(c)),
+      columns: ALL_COLUMNS.filter((c) => (raw.columns ?? ALL_COLUMNS).includes(c) || !(raw.knownColumns ?? ALL_COLUMNS.filter((x) => x !== 'ci' && x !== 'manual')).includes(c)),
       knownColumns: ALL_COLUMNS,
     };
   } catch {

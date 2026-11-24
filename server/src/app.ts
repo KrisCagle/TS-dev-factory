@@ -14,6 +14,12 @@ import { Previews } from './previews.js';
 import { Reports, type Range } from './reports.js';
 import { Rules } from './rules.js';
 import { Scoper } from './scoper.js';
+import { Game } from './game.js';
+import { Asker } from './asker.js';
+import { catchUp } from './catchup.js';
+import { Plugins } from './plugins.js';
+import { SlackApp } from './slack-app.js';
+import { toTicket as sentryTicket, verifySignature } from './connectors/sentry.js';
 import { Orchestrator } from './orchestrator.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
@@ -36,6 +42,10 @@ export interface FactoryOptions {
   serveWeb?: boolean;
   /** Post the daily standup on schedule (default true). */
   schedules?: boolean;
+  /** Folder of factory plugins (default: plugins/ in the repo; set to '' to load none). */
+  pluginsDir?: string;
+  /** Override how plugin files are imported (tests). */
+  pluginImporter?: (file: string) => Promise<Record<string, unknown>>;
 }
 
 /** Builds the whole factory — store, orchestrator, services, REST + WebSocket API — without listening yet. */
@@ -57,7 +67,15 @@ export function createFactory(opts: FactoryOptions) {
   let broadcastLate: (msg: unknown) => void = () => undefined;
   const notifier = new Notifier(store, (m) => broadcastLate(m));
   const reports = new Reports(store, notifier);
+  const asker = new Asker(store);
+  const pluginsDir = opts.pluginsDir ?? process.env.FACTORY_PLUGINS_DIR ?? path.resolve(__dirname, '../../plugins');
+  const plugins = new Plugins(store, pluginsDir, opts.pluginImporter);
+  const pluginsReady = pluginsDir ? plugins.load().catch((e) => console.error('[plugins]', e)) : Promise.resolve();
+  store.on('settings', () => plugins.refreshEnabled());
+  const slackApp = new SlackApp(store, orch);
+  const game = new Game(store, (event) => broadcastLate({ type: 'celebrate', event }));
   orch.hooks = {
+    plugins,
     rulesFor: (projectId) => rules.forPrompt(projectId),
     onFinished: (ticketId) => previews.stop(ticketId),
     afterTester: (ticketId, cwd) => artifacts.collect(ticketId, cwd),
@@ -65,7 +83,8 @@ export function createFactory(opts: FactoryOptions) {
   };
 
   const app = express();
-  app.use(express.json({ limit: '2mb' }));
+  // keep the raw body for webhook signature checks
+  app.use(express.json({ limit: '2mb', verify: (req, _res, buf) => { (req as unknown as { rawBody: Buffer }).rawBody = buf; } }));
 
   const wrap = (fn: (req: Request, res: Response) => unknown) => async (req: Request, res: Response, next: NextFunction) => {
     try {
@@ -105,6 +124,8 @@ export function createFactory(opts: FactoryOptions) {
     stats: stats(),
     connectors: CONNECTORS.map((c) => ({ source: c.source, label: c.label, enabled: c.isEnabled(store.settings()) })),
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
+    game: game.view(),
+    slackApp: slackApp.status,
   })));
 
   app.get('/api/logs', wrap((req) => store.logs(undefined, Number(req.query.limit ?? 300))));
@@ -125,11 +146,33 @@ export function createFactory(opts: FactoryOptions) {
 
   const PM_MOVABLE: Stage[] = ['backlog', 'ready'];
 
+  /** Validate "waits on": real tickets, not itself, no cycles. */
+  const checkDeps = (t: Ticket, deps: unknown): string[] => {
+    if (!Array.isArray(deps)) throw Object.assign(new Error('dependsOn must be a list of ticket ids'), { status: 400 });
+    const ids = [...new Set(deps.map(String))];
+    for (const d of ids) {
+      if (d === t.id) throw Object.assign(new Error('A ticket can’t wait on itself.'), { status: 400 });
+      if (!store.ticket(d)) throw Object.assign(new Error(`Unknown ticket ${d}`), { status: 400 });
+    }
+    // would t be reachable from its own dependencies?
+    const seen = new Set<string>();
+    const stack = [...ids];
+    while (stack.length) {
+      const cur = stack.pop()!;
+      if (cur === t.id) throw Object.assign(new Error('That would create a loop of tickets waiting on each other.'), { status: 400 });
+      if (seen.has(cur)) continue;
+      seen.add(cur);
+      stack.push(...(store.ticket(cur)?.dependsOn ?? []));
+    }
+    return ids;
+  };
+
   app.patch('/api/tickets/:id', wrap((req) => {
     const t = store.ticket(req.params.id);
     if (!t) throw Object.assign(new Error('not found'), { status: 404 });
-    const { title, description, priority, labels, stage, order, harvest: hv } = req.body as Partial<Ticket>;
+    const { title, description, priority, labels, stage, order, harvest: hv, dependsOn } = req.body as Partial<Ticket>;
     const patch: Partial<Ticket> = {};
+    if (dependsOn !== undefined) patch.dependsOn = checkDeps(t, dependsOn);
     if (hv !== undefined) patch.harvest = { ...(t.harvest ?? { loggedHours: 0 }), projectId: hv.projectId, taskId: hv.taskId };
     if (title !== undefined) patch.title = title;
     if (description !== undefined) patch.description = description;
@@ -160,6 +203,19 @@ export function createFactory(opts: FactoryOptions) {
   }));
   app.post('/api/tickets/:id/cancel', wrap((req) => orch.cancel(req.params.id)));
   app.post('/api/tickets/:id/retry', wrap((req) => orch.retry(req.params.id)));
+  app.post('/api/tickets/:id/takeover', wrap(async (req) => {
+    const r = orch.takeOver(req.params.id);
+    if (req.body?.openEditor && r.worktree) await files.openInEditor(req.params.id).catch(() => undefined);
+    return r;
+  }));
+  app.post('/api/tickets/:id/handback', wrap((req) => orch.handBack(req.params.id, req.body?.note ? String(req.body.note) : undefined)));
+  app.post('/api/tickets/:id/ask', wrap((req) => asker.ask(req.params.id, String(req.body?.question ?? ''))));
+  app.get('/api/catchup', wrap((req) => catchUp(store, Number(req.query.since) || Date.now() - 3_600_000, (req.query.projectId as string) || undefined)));
+  app.post('/api/tickets/:id/revert', wrap((req) => orch.revert(req.params.id, { redo: !!req.body?.redo, note: req.body?.note ? String(req.body.note) : undefined })));
+  app.post('/api/tickets/:id/smoke', wrap((req) => {
+    if (!store.ticket(req.params.id)?.ship) throw Object.assign(new Error('This ticket hasn’t shipped yet.'), { status: 409 });
+    void orch.smoke(req.params.id);
+  }));
   app.post('/api/tickets/:id/notes', wrap((req) => {
     if (!store.ticket(req.params.id)) throw Object.assign(new Error('not found'), { status: 404 });
     if (!String(req.body?.text ?? '').trim()) throw Object.assign(new Error('text is required'), { status: 400 });
@@ -169,7 +225,11 @@ export function createFactory(opts: FactoryOptions) {
 
   // ---------------------------------------------------------------- projects: house rules
   app.get('/api/projects/:id/rules', wrap((req) => ({ ...rules.get(req.params.id), suggestions: rules.suggestions(req.params.id) })));
-  app.put('/api/projects/:id/rules', wrap((req) => rules.set(req.params.id, String(req.body?.text ?? ''))));
+  app.put('/api/projects/:id/rules', wrap((req) => {
+    const r = rules.set(req.params.id, String(req.body?.text ?? ''));
+    if (r.text.trim()) store.emit('game:event', { type: 'rules' });
+    return r;
+  }));
 
   // ---------------------------------------------------------------- previews, files, artifacts
   app.post('/api/tickets/:id/preview/start', wrap((req) => previews.start(req.params.id)));
@@ -187,7 +247,34 @@ export function createFactory(opts: FactoryOptions) {
   });
 
   // ---------------------------------------------------------------- ticket writer
-  app.post('/api/scope', wrap((req) => scoper.draft(req.body ?? {})));
+  app.post('/api/scope', wrap(async (req) => {
+    const d = await scoper.draft(req.body ?? {});
+    if (!req.body?.answers?.length) store.emit('game:event', { type: 'scoped' });
+    return d;
+  }));
+  app.get('/api/game', wrap(() => game.view()));
+  app.post('/api/slack-app/test', wrap(async () => {
+    const s = store.settings().slackApp;
+    if (!s.enabled) throw Object.assign(new Error('Turn on the Slack app first.'), { status: 400 });
+    return { message: await slackApp.test() };
+  }));
+
+  // ---------------------------------------------------------------- plugins
+  app.get('/api/plugins', wrap(() => plugins.summary()));
+  app.post('/api/plugins/sources/:id/sync', wrap(async (req) => {
+    const src = plugins.source(req.params.id);
+    if (!src) throw Object.assign(new Error('No enabled plugin source with that id'), { status: 404 });
+    const items = await src.pull();
+    let created = 0;
+    for (const it of items) {
+      const externalId = `${src.id}:${it.externalId}`;
+      const existing = store.tickets().find((t) => t.source === 'plugin' && t.externalId === externalId);
+      if (existing) continue;
+      store.createTicket({ title: it.title, description: it.description ?? '', priority: it.priority ?? 'medium', labels: it.labels ?? [], externalId, externalUrl: it.externalUrl, source: 'plugin', stage: 'backlog', projectId: req.body?.projectId });
+      created++;
+    }
+    return { fetched: items.length, created };
+  }));
 
   // ---------------------------------------------------------------- notifications & reports
   app.post('/api/notifications/test', wrap(() => {
@@ -222,12 +309,9 @@ export function createFactory(opts: FactoryOptions) {
   app.post('/api/factory/pause', wrap((req) => orch.setPaused(Boolean(req.body?.paused))));
 
   // ---------------------------------------------------------------- connectors
-  app.post('/api/connectors/:source/sync', wrap(async (req) => {
-    const c = connectorFor(req.params.source as TicketSource);
-    if (!c) throw Object.assign(new Error('unknown connector'), { status: 404 });
-    const s = store.settings();
-    if (!c.isEnabled(s)) throw Object.assign(new Error(`${c.label} is not configured`), { status: 400 });
-    const incoming = await c.pull(s);
+  /** Import from a tracker into Backlog; existing tickets get refreshed while they're still waiting. */
+  const importFrom = async (c: NonNullable<ReturnType<typeof connectorFor>>, projectId?: string) => {
+    const incoming = await c.pull(store.settings());
     let created = 0;
     for (const it of incoming) {
       const existing = store.tickets().find((t) => t.source === c.source && t.externalId === it.externalId);
@@ -235,11 +319,38 @@ export function createFactory(opts: FactoryOptions) {
         if (['backlog', 'ready'].includes(existing.stage)) store.updateTicket(existing.id, { title: it.title, description: it.description, priority: it.priority, labels: it.labels });
         continue;
       }
-      store.createTicket({ ...it, source: c.source, stage: 'backlog', projectId: (req.body?.projectId as string | undefined) ?? undefined });
+      store.createTicket({ ...it, source: c.source, stage: 'backlog', projectId });
       created++;
     }
     return { fetched: incoming.length, created };
+  };
+
+  app.post('/api/connectors/:source/sync', wrap(async (req) => {
+    const c = connectorFor(req.params.source as TicketSource);
+    if (!c) throw Object.assign(new Error('unknown connector'), { status: 404 });
+    if (!c.isEnabled(store.settings())) throw Object.assign(new Error(`${c.label} is not configured`), { status: 400 });
+    return importFrom(c, (req.body?.projectId as string | undefined) ?? undefined);
   }));
+
+  // Sentry can push new issues to us instead of waiting for an import (needs a URL Sentry can reach).
+  app.post('/api/webhooks/sentry', wrap((req) => {
+    const s = store.settings().connectors.sentry;
+    const raw = (req as unknown as { rawBody?: Buffer }).rawBody ?? Buffer.from(JSON.stringify(req.body ?? {}));
+    if (!s.enabled || !verifySignature(raw, req.header('sentry-hook-signature'), s.webhookSecret)) throw Object.assign(new Error('Invalid signature'), { status: 401 });
+    const issue = req.body?.data?.issue;
+    if (req.header('sentry-hook-resource') !== 'issue' || req.body?.action !== 'created' || !issue?.id) return { ignored: true };
+    if (store.tickets().some((t) => t.source === 'sentry' && t.externalId === String(issue.id))) return { duplicate: true };
+    const t = store.createTicket({ ...sentryTicket(issue), source: 'sentry', stage: 'backlog' });
+    return { created: t.key };
+  }));
+
+  // optional: pull new Sentry issues every 10 minutes
+  const sentryTimer = setInterval(() => {
+    const s = store.settings();
+    const c = connectorFor('sentry');
+    if (c && s.connectors.sentry.autoImport && c.isEnabled(s)) void importFrom(c).catch((e) => console.error('[sentry] auto-import:', e.message));
+  }, 10 * 60_000);
+  sentryTimer.unref();
 
   app.post('/api/connectors/:source/test', wrap(async (req) => {
     const c = connectorFor(req.params.source as TicketSource);
@@ -249,13 +360,14 @@ export function createFactory(opts: FactoryOptions) {
 
   // ---------------------------------------------------------------- demo data
   app.post('/api/demo', wrap((req) => {
+    const ac = (...xs: string[]) => `\n\n## Acceptance criteria\n${xs.map((x) => `- [ ] ${x}`).join('\n')}`;
     const demo: Array<[string, Priority, string, string[]]> = [
-      ['Add dark mode toggle to settings page', 'high', 'Users want a dark theme. Persist choice per user and respect the OS preference by default.', ['frontend', 'ux']],
-      ['Rate-limit the public /search endpoint', 'urgent', 'We are getting scraped. 60 req/min per IP, return 429 with Retry-After.', ['backend', 'security']],
-      ['Fix date formatting on invoices', 'medium', 'Invoices show ISO timestamps. Use the account locale.', ['bug', 'billing']],
-      ['Add CSV export to the reports table', 'medium', 'Export the currently filtered rows. Include headers.', ['frontend']],
-      ['Upgrade logger and remove console.log calls', 'low', 'Replace stray console.log with the structured logger.', ['chore']],
-      ['Password reset emails expire too fast', 'high', 'Token TTL is 5 minutes; should be 60. Add a test.', ['bug', 'auth']],
+      ['Add dark mode toggle to settings page', 'high', `Users want a dark theme.${ac('A toggle on the settings page switches between light and dark', 'The choice is remembered per user', 'New users get their OS preference by default')}`, ['frontend', 'ux']],
+      ['Rate-limit the public /search endpoint', 'urgent', `We are getting scraped.${ac('More than 60 requests a minute from one IP get a 429', 'The 429 includes a Retry-After header', 'Signed-in users are not limited')}`, ['backend', 'security']],
+      ['Fix date formatting on invoices', 'medium', `Invoices show ISO timestamps.${ac('Invoice dates use the account locale', 'PDF and email invoices match')}`, ['bug', 'billing']],
+      ['Add CSV export to the reports table', 'medium', `Export the currently filtered rows.${ac('An Export CSV button downloads the filtered rows', 'The file has a header row', 'Commas and quotes in values are escaped')}`, ['frontend']],
+      ['Upgrade logger and remove console.log calls', 'low', `Replace stray console.log with the structured logger.${ac('No console.log calls remain in src/', 'Logs include the request ID')}`, ['chore']],
+      ['Password reset emails expire too fast', 'high', `Token TTL is 5 minutes; should be 60.${ac('Reset links work for 60 minutes', 'Expired links show a clear message with a way to resend')}`, ['bug', 'auth']],
     ];
     const projectId = req.body?.projectId as string | undefined;
     demo.forEach(([title, priority, description, labels], i) => store.createTicket({ title, priority, description, labels, projectId, stage: i < 4 ? 'ready' : 'backlog' }));
@@ -292,6 +404,7 @@ export function createFactory(opts: FactoryOptions) {
   store.on('settings', (settings) => broadcast({ type: 'settings', settings }));
   store.on('factory', (factory) => broadcast({ type: 'factory', factory }));
   store.on('attention', (attention) => { broadcast({ type: 'attention', attention }); pushStats(); });
+  store.on('game', (g) => broadcast({ type: 'game', game: g }));
 
   let started = false;
   return {
@@ -299,12 +412,18 @@ export function createFactory(opts: FactoryOptions) {
     server,
     store,
     orch,
+    game,
+    plugins,
+    pluginsReady,
+    slackApp,
     /** Start listening and start the agents' scheduler. Resolves with the bound port. */
-    listen(port: number) {
+    async listen(port: number) {
+      await pluginsReady;
       return new Promise<number>((resolve) => {
         server.listen(port, () => {
           started = true;
           orch.start();
+          slackApp.start();
           if (opts.schedules !== false) reports.startSchedule();
           resolve((server.address() as { port: number }).port);
         });
@@ -312,6 +431,8 @@ export function createFactory(opts: FactoryOptions) {
     },
     /** Stop agents, previews and the HTTP server, and write the database to disk. */
     async close() {
+      clearInterval(sentryTimer);
+      slackApp.stop();
       orch.stop();
       previews.stopAll();
       reports.stopSchedule();

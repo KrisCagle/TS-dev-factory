@@ -8,6 +8,7 @@ export const STAGE_META: Record<Stage, { label: string; hint: string; icon: stri
   testing: { label: 'Testing', hint: 'Tester is verifying', icon: '🧪' },
   reviewing: { label: 'Review', hint: 'Reviewer is the quality gate', icon: '🔍' },
   ci: { label: 'CI checks', hint: 'PR open — waiting for checks to go green', icon: '🚦' },
+  manual: { label: 'With you', hint: 'You took it over in your editor — hand it back when you’re done', icon: '🧑‍💻' },
   awaiting_approval: { label: 'Needs you', hint: 'Waiting for PM approval', icon: '✋' },
   done: { label: 'Shipped', hint: 'Merged or PR opened', icon: '🚀' },
   failed: { label: 'Failed', hint: 'Something broke — retry or edit', icon: '⚠️' },
@@ -27,6 +28,8 @@ export const SOURCE_META: Record<TicketSource, { label: string; icon: string }> 
   github: { label: 'GitHub', icon: '🐙' },
   linear: { label: 'Linear', icon: '◐' },
   jira: { label: 'Jira', icon: '◆' },
+  sentry: { label: 'Sentry', icon: '🐞' },
+  plugin: { label: 'Plugin', icon: '🔌' },
 };
 
 export const ROLE_META: Record<AgentRole, { icon: string; desc: string }> = {

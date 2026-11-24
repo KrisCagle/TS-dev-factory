@@ -154,3 +154,17 @@ describe('code viewer safety', () => {
     await api.get(`/api/tickets/${t.id}/artifacts/..%2F..%2Fdb.json`).expect(404);
   });
 });
+
+describe('weekly highlight', () => {
+  it('names the best ship of the week in the weekly report', async () => {
+    const a = f.store.createTicket({ title: 'Messy one', stage: 'ready' });
+    const b = f.store.createTicket({ title: 'Clean one', stage: 'ready' });
+    f.store.updateTicket(a.id, { stage: 'done', finishedAt: Date.now(), iterations: 3, confidence: { score: 50, level: 'low', reasons: [] } });
+    f.store.updateTicket(b.id, { stage: 'done', finishedAt: Date.now(), iterations: 0, confidence: { score: 95, level: 'high', reasons: [] } });
+    const r = (await api.get('/api/reports?range=week').expect(200)).body;
+    expect(r.highlight).toMatchObject({ key: b.key, title: 'Clean one' });
+    expect(r.highlight.why).toContain('no rework');
+    expect(r.markdown).toContain('Highlight of the week');
+    expect((await api.get('/api/reports?range=day').expect(200)).body.highlight).toBeUndefined();
+  });
+});

@@ -39,7 +39,7 @@ export interface GithubExtras {
   createPR(s: Settings, head: string, base: string, title: string, body: string): Promise<{ url: string; number: number }>;
   findPR(s: Settings, head: string): Promise<{ url: string; number: number } | undefined>;
   prChecks(s: Settings, prNumber: number): Promise<{ sha: string; state: CheckState; checks: CiCheck[]; merged: boolean; closed: boolean }>;
-  mergePR(s: Settings, prNumber: number, method: 'squash' | 'merge' | 'rebase', title: string): Promise<void>;
+  mergePR(s: Settings, prNumber: number, method: 'squash' | 'merge' | 'rebase', title: string): Promise<{ sha?: string }>;
 }
 
 export const github: Connector & GithubExtras = {
@@ -90,7 +90,8 @@ export const github: Connector & GithubExtras = {
   },
 
   async mergePR(s, prNumber, method, title) {
-    await http(api(s, `/pulls/${prNumber}/merge`), { method: 'PUT', headers: headers(s), json: { merge_method: method, commit_title: title } });
+    const r = await http<{ sha?: string }>(api(s, `/pulls/${prNumber}/merge`), { method: 'PUT', headers: headers(s), json: { merge_method: method, commit_title: title } });
+    return { sha: r?.sha };
   },
 
   async test(s) {

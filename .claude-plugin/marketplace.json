@@ -1,0 +1,13 @@
+{
+  "name": "ai-dev-factory",
+  "description": "Plugins for AI Dev Factory",
+  "owner": { "name": "Kris Cagle", "url": "https://github.com/KrisCagle" },
+  "plugins": [
+    {
+      "name": "factory",
+      "description": "Run your AI Dev Factory from Claude Code: tickets, status, inbox, ask a ticket, standup.",
+      "version": "0.2.0",
+      "source": "./integrations/claude-code-plugin"
+    }
+  ]
+}

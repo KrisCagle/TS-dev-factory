@@ -1,3 +1,4 @@
+import { parseCriteria } from './quality.js';
 import type { Ticket } from './types.js';
 
 export const PLAN_SCHEMA = {
@@ -6,7 +7,17 @@ export const PLAN_SCHEMA = {
     summary: { type: 'string' },
     steps: { type: 'array', items: { type: 'string' } },
     risks: { type: 'array', items: { type: 'string' } },
-    files: { type: 'array', items: { type: 'string' } },
+    files: { type: 'array', items: { type: 'string' }, description: 'Repo-relative paths you expect to change' },
+    estimate: {
+      type: 'object',
+      description: 'Forecast for the whole ticket (coding, testing, review, rework)',
+      properties: {
+        size: { type: 'string', enum: ['S', 'M', 'L', 'XL'] },
+        costUsd: { type: 'number', description: 'Expected total agent spend in USD' },
+        minutes: { type: 'number', description: 'Expected wall-clock minutes until it is ready for sign-off' },
+      },
+      required: ['size', 'costUsd', 'minutes'],
+    },
   },
   required: ['summary', 'steps', 'risks', 'files'],
 };
@@ -17,6 +28,29 @@ export const TEST_SCHEMA = {
     passed: { type: 'boolean' },
     summary: { type: 'string' },
     failures: { type: 'array', items: { type: 'string' } },
+    testsAdded: { type: 'number', description: 'How many new tests you added for this change' },
+    criteria: {
+      type: 'array',
+      description: 'One entry per acceptance criterion in the ticket',
+      items: {
+        type: 'object',
+        properties: {
+          criterion: { type: 'string' },
+          status: { type: 'string', enum: ['proven', 'unproven', 'failed'] },
+          evidence: { type: 'string', description: 'Test name, screenshot file or command that proves it' },
+        },
+        required: ['criterion', 'status'],
+      },
+    },
+    coverage: {
+      type: 'object',
+      description: 'Line coverage in percent, only if the project can measure it',
+      properties: {
+        before: { type: 'number' },
+        after: { type: 'number' },
+        files: { type: 'array', items: { type: 'object', properties: { file: { type: 'string' }, pct: { type: 'number' } }, required: ['file', 'pct'] } },
+      },
+    },
   },
   required: ['passed', 'summary', 'failures'],
 };
@@ -83,7 +117,8 @@ ${t.plan.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')}${t.plan.files.length 
 export function plannerPrompt(t: Ticket) {
   return `${header(t)}
 
-Produce an implementation plan for this ticket. Return it in the structured output format.`;
+Produce an implementation plan for this ticket. List the files you expect to change (repo-relative), and forecast the size, total agent cost in USD and minutes until it's ready for sign-off.
+Return it in the structured output format.`;
 }
 
 export function coderPrompt(t: Ticket) {
@@ -105,7 +140,17 @@ export function testerPrompt(t: Ticket) {
   return `${header(t)}${planBlock(t)}
 
 The engineer has implemented this ticket on the current branch. Verify it: run the relevant tests (and add tests where the project has a suite).
-Return passed, a one-line summary, and a list of failures in the structured output format.`;
+${criteriaBlock(t)}
+If the project can measure coverage (e.g. \`vitest --coverage\`, \`jest --coverage\`, \`pytest --cov\`), report line coverage before (on the base branch, \`git stash\` or a clean checkout) and after this change, plus the coverage of the files it touched. Skip coverage if there's no tool for it — don't install one.
+Return passed, a one-line summary, failures, testsAdded, criteria and coverage in the structured output format.`;
+}
+
+function criteriaBlock(t: Ticket) {
+  const cs = parseCriteria(t.description);
+  if (!cs.length) return 'For each thing the ticket asks for, say how you proved it works (criteria list).';
+  return `## Prove every acceptance criterion
+For each one, name the passing test or screenshot that proves it. Mark it "unproven" if nothing does yet, or "failed" if it doesn't work.
+${cs.map((c, i) => `${i + 1}. ${c}`).join('\n')}`;
 }
 
 export function reviewerPrompt(t: Ticket, diff: string) {

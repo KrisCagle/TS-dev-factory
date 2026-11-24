@@ -6,6 +6,7 @@ import { useUI } from '../ui';
 import { ago } from '../meta';
 import type { AttentionItem, CaseVerdict } from '../types';
 import { PreviewControls } from './FileViewer';
+import { QualityPanel } from './Quality';
 
 const KIND_META: Record<AttentionItem['kind'], { icon: string; label: string; color: string }> = {
   review: { icon: '🧾', label: 'Review', color: 'var(--accent)' },
@@ -24,6 +25,16 @@ export function Brief({ item }: { item: AttentionItem }) {
       <dt>Why now</dt><dd>{b.whyNow}</dd>
       <dt>If it waits</dt><dd>{b.ifItWaits}</dd>
     </dl>
+  );
+}
+
+/** Item text, with ``` fenced blocks shown as code (smoke test output, stack traces). */
+function Body({ text }: { text: string }) {
+  const parts = text.split(/```\w*\n?/);
+  return (
+    <div className="abody">
+      {parts.map((p, i) => (i % 2 ? <pre key={i} className="code small" style={{ maxHeight: 200 }}>{p.trim()}</pre> : p.trim() && <p key={i} style={{ margin: 0, whiteSpace: 'pre-wrap' }}>{p.trim()}</p>))}
+    </div>
   );
 }
 
@@ -62,8 +73,9 @@ export function DecisionCard({ item, showTicket = true }: { item: AttentionItem;
         {held && <span className="chip" title={item.heldReason}>⏳ {item.heldReason ?? 'On hold'}</span>}
       </header>
       <h3>{item.title}</h3>
-      {item.body && item.kind !== 'review' && <p className="abody">{item.body}</p>}
+      {item.body && item.kind !== 'review' && <Body text={item.body} />}
       {item.review && <p className="abody">{item.review.summary}</p>}
+      {item.kind === 'review' && t && <QualityPanel t={t} />}
       <Brief item={item} />
       {!held && (
         <>
@@ -211,6 +223,7 @@ export function ReviewWalkthrough({ item, onClose }: { item: AttentionItem; onCl
           {d.idx === -1 && (
             <>
               <h3>Setup</h3>
+              {ticket && <QualityPanel t={ticket} />}
               <p className="small muted">Get to where the change is, then walk the cases.</p>
               <ol className="setup">
                 {review.setup.map((s, i) => {

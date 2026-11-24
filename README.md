@@ -19,6 +19,10 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Rework loop**: failed tests or requested review changes go back to the Coder automatically. When the rework limit is hit, the ticket comes to you.
 - **Watchdog** ⏰: an agent that goes quiet (a hung command, a wait that never ends) is restarted with a nudge. You only hear about it if nudging doesn't work.
 - **CI-aware merge gate** 🚦: with pull requests, the factory opens the PR first and holds your sign-off until checks are green. Red CI goes back to the Coder, not to you. On approval the PR is merged with squash, merge or rebase.
+- **Proof for every acceptance criterion** ✅: the Tester maps each item in the ticket's "Acceptance criteria" checklist to the passing test or screenshot that proves it. Anything without proof is flagged in your sign-off, or sent back to the Coder if you turn on *Require proof*.
+- **Coverage gate**: when a project can measure test coverage, a change that lowers it by more than the allowed amount goes back to the Coder. The before → after numbers show in your review.
+- **Safety score** 🛡: every sign-off shows a 0–100 confidence score (tests added, criteria proven, CI, change size, sensitive files touched, rework loops) and exactly why, so you know where to look closer.
+- **Smoke test and one-click revert** 🧯: after shipping, the factory runs the project's smoke command on the base branch. If it fails, your inbox offers **Revert & redo** (a revert commit or revert PR, plus a redo ticket with the failure attached) or a fix-forward ticket. Any shipped ticket can be reverted from its drawer.
 - **House rules** 📐: edit the conventions every agent follows. They're saved in the repo's `CLAUDE.md`, and feedback you keep giving on tickets is suggested as new rules.
 
 ### Your job as PM
@@ -28,6 +32,11 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Live preview** ▶: run your app from a ticket's branch copy on its own port and click through the change before you sign off.
 - **Code viewer**: a Files tab on every ticket shows the changed files first with added lines highlighted, and has **Open in VS Code** to take over by hand.
 - **Ticket writer** ✨: type a rough idea, bug report or Slack thread and the Scoper turns it into a ticket with a clear title, context and acceptance criteria. It asks at most two questions, and you can skip them.
+- **Take over in VS Code, then hand it back** 🧑‍💻: pause the agents on a ticket and open its branch copy in your editor. When you click **Hand back**, the Tester and Reviewer check your edits (the Coder only steps in if something fails).
+- **Ask a ticket** 💬: an Ask tab on every ticket for questions like "why did you change this file?", "what's left?" or "why was it sent back?". Answers come from its plan, agent log, tests, review and diff (live mode also reads the branch).
+- **While you were away** 👋: come back after 20+ minutes and get one summary: what shipped, what's waiting on you, what broke, what started and what it cost. You can also open it from the ⌘K palette.
+- **Cost forecasts** 📏: the Planner forecasts size, cost and time for every ticket. Anything forecast over your limit (default $3) asks you first. Forecasts adjust to how past tickets on each project actually went, and the drawer shows forecast against actual.
+- **Dependencies and no collisions** ⛓: mark "waits on" between tickets and they run in order. Two tickets that plan to change the same files never code at the same time; the second one waits and says why.
 - **Notes and control**: add notes every agent treats as top priority, approve plans before coding (optional), stop a ticket, or pause the whole factory.
 
 ### Running more than one thing
@@ -36,11 +45,30 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Ticket sources**: a built-in board plus **GitHub Issues, Linear and Jira**. Imported tickets land in Backlog, and progress is sent back as comments and status changes.
 - **Shipping**: on approval, merge locally, open a GitHub PR, or leave the branch. Set per project.
 
+### Plugged into your workflow 🔌
+
+- **Claude Code plugin**: run the factory from Claude Code. `/plugin marketplace add KrisCagle/TS-dev-factory`, then `/plugin install factory@ai-dev-factory`, and you get `/factory:status`, `/factory:new <idea>`, `/factory:inbox`, `/factory:approve FAC-12`, `/factory:sendback FAC-12 <note>`, `/factory:ask FAC-12 <question>` and `/factory:standup`.
+- **MCP server for any Claude**: the same tools for Claude Desktop and Cowork, so you can say "turn this Slack thread into a factory ticket" or "what's waiting on me?" from any conversation. It has no dependencies; see [Using it from Claude](#using-it-from-claude).
+- **Factory plugins**: small JavaScript files in `plugins/` that add an agent role (like the example *Security reviewer*), a quality gate, a ticket source or a room in the Office, or react to events. Four examples are included; see [plugins/README.md](plugins/README.md).
+- **Approve from Slack**: sign-offs and decisions arrive in a channel with **Approve & ship**, **Send back…** (asks for your note) and other buttons. It uses Slack's Socket Mode, so it works without a public URL, and you can limit who may approve.
+- **Sentry → tickets**: unresolved Sentry issues become Backlog tickets with the stack trace, how many users it hits and acceptance criteria. Import on demand, every 10 minutes, or by webhook. When the fix ships, the Sentry issue is resolved with a comment.
+
 ### Staying in the loop
 
 - **Notifications** 🔔: Mac, browser and Slack pings when something needs you, CI fails, an agent is stuck, or a ticket ships or fails. Every channel and event can be switched off, with quiet hours.
 - **Standup and weekly report** 📊: shipped, in progress, waiting on you, blocked, agent spend and Harvest hours. Copy as Markdown, post to Slack, or have the standup posted every weekday.
 - **Harvest time tracking** ⏱: a timer starts on the ticket's Harvest project when you open something that needs you and stops when you decide. You can also log hours by hand. Today's total sits in the top bar.
+
+### Game on 🏆
+
+Optional, and you can switch any of it off. It rewards shipping *well*, not shipping a lot.
+
+- **XP and levels**: from Intern to Factory Legend. A ship earns more with a high safety score, no rework and every acceptance criterion proven. Answering the inbox quickly earns a little too. A revert costs XP, but reverting fast earns *Owned it*.
+- **Achievements**: 16 of them, like *Clean sweep* (no rework), *Show your work* (every criterion proven), *Safe hands* (5 high-confidence ships in a row), *Green machine* (10 first-try CI passes) and *Inbox zero* (before 10am).
+- **Daily quests and streaks**: three small goals a day ("Clear the inbox", "Ship a ticket with no rework") and a streak of working days with a ship. Weekends don't break it.
+- **Agent trading cards**: click a character in the Office, or open the **Trophy room**, to see each agent's level, tickets shipped, clean-first-time rate, problems caught and spend.
+- **Office upgrades**: plants, a trophy shelf with your badges, an espresso bar, a streak sign, an arcade cabinet, an aquarium and a golden rocket unlock as you level up.
+- **Launch celebrations**: a rocket and confetti when something ships, plus pop-ups for achievements, quests and level-ups (sound is optional). The weekly report names the week's best ship.
 
 ### The Office 🏢
 
@@ -52,7 +80,7 @@ A live, top-down animated office. Each agent is a character that pulls tickets o
 
 ### Make it yours
 
-Theme, accent color, density, board columns, card fields, header widgets, grouping and default view. There's a ⌘K command palette and keyboard shortcuts: `n` new ticket, `g` then `i/o/b/r/a/h/l/s` to navigate, `/` to filter.
+Theme, accent color, density, board columns, card fields, header widgets, grouping and default view. There's a ⌘K command palette and keyboard shortcuts: `n` new ticket, `g` then `i/o/b/r/a/h/t/l/s` to navigate, `/` to filter.
 
 ## Screenshots
 
@@ -66,6 +94,12 @@ Theme, accent color, density, board columns, card fields, header widgets, groupi
 | **House rules** | **Projects** |
 | ![Editing CLAUDE.md with suggestions from feedback](screenshots/rules.png) | ![Per-project repo, shipping and preview settings](screenshots/projects.png) |
 
+| Safety score and proof per criterion | Trophy room |
+| --- | --- |
+| ![A sign-off with its safety score, reasons and proof for each acceptance criterion](screenshots/safety-score.png) | ![Level, quests, highlight of the week and achievements](screenshots/trophy-room.png) |
+| **Ask a ticket** | |
+| ![Questions about a ticket answered from its record](screenshots/ask-a-ticket.png) | |
+
 | Notifications | Hand-off to the ship dock |
 | --- | --- |
 | ![Notification channels, events and quiet hours](screenshots/notifications.png) | ![PM carries an approved ticket to the rocket](screenshots/ship-dock-launch.png) |
@@ -77,8 +111,8 @@ Theme, accent color, density, board columns, card fields, header widgets, groupi
 Requires Node 20+ and git.
 
 ```bash
-git clone https://github.com/KrisCagle/ai-dev-factory.git
-cd ai-dev-factory
+git clone https://github.com/KrisCagle/TS-dev-factory.git
+cd TS-dev-factory
 npm install
 npm run build
 npm start                 # → http://localhost:4317
@@ -122,16 +156,47 @@ Agents load your repo's `CLAUDE.md`, so put team conventions there. You can edit
 
 **Notifications:** Mac notifications come from the factory server via `osascript`. For Slack, create an incoming webhook and paste it in Settings → Notifications; the same webhook is used for the daily standup.
 
-Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `FACTORY_MOCK_SPEED` (simulated agents only; 0.1 = 10× faster).
+Environment variables (all optional): `PORT`, `FACTORY_MODE=live|mock`, `FACTORY_REPO=/path/to/repo`, `FACTORY_DATA=/path/db.json`, `GITHUB_TOKEN`, `LINEAR_API_KEY`, `JIRA_TOKEN`, `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`, `SENTRY_TOKEN`, `FACTORY_PLUGINS_DIR`, `FACTORY_MOCK_SPEED` (simulated agents only; 0.1 = 10× faster).
 
 **Harvest:** create a personal access token at Harvest ID → Developers. In Settings → Harvest, paste the token and your account ID, click **Test & load projects**, and pick a default project and task. Individual tickets can bill to a different project from the ticket drawer.
 
 **CI gate in live mode:** set "When you approve" to *Push branch & open a GitHub PR* and connect GitHub, with a token that has `repo` scope so the factory can read checks and merge.
 
+## Using it from Claude
+
+**Claude Code** (slash commands plus the MCP tools):
+
+```
+/plugin marketplace add KrisCagle/TS-dev-factory
+/plugin install factory@ai-dev-factory
+```
+
+**Claude Desktop** (or any MCP client): add this to `claude_desktop_config.json`, with the path to your clone:
+
+```json
+{
+  "mcpServers": {
+    "ai-dev-factory": {
+      "command": "node",
+      "args": ["/path/to/ai-dev-factory/integrations/claude-code-plugin/mcp/factory-mcp.mjs"],
+      "env": { "FACTORY_URL": "http://localhost:4317" }
+    }
+  }
+}
+```
+
+The factory must be running. Tools: `factory_status`, `list_tickets`, `get_ticket`, `draft_ticket`, `create_ticket`, `inbox`, `answer_inbox`, `add_note`, `ask_ticket`, `move_ticket`, `report`, `catch_up`, `pause_factory`.
+
+**Slack app:** at api.slack.com/apps choose *Create New App → From a manifest* and paste [`integrations/slack/manifest.json`](integrations/slack/manifest.json). Install it to your workspace, create an app-level token with `connections:write`, and paste the bot token (`xoxb-…`), app token (`xapp-…`) and channel into **Settings → Approve from Slack**. Invite the bot to the channel.
+
+**Sentry:** in Settings → Ticket sources, add your organization and project slugs and an auth token that can read projects, events and issues (and resolve issues). For instant imports, point a Sentry internal integration's webhook at `http://<your-factory>/api/webhooks/sentry` and paste its client secret as the webhook secret.
+
 ## Safety notes
 
 - Agents run with `acceptEdits` permission mode. They are limited to the tools you allow for each role, and they work inside a separate worktree, never in your checkout.
 - The Coder and Tester can run `Bash` by default. Remove it on the Agents page if you'd rather they didn't.
+- Factory plugins run inside the factory process with your user's permissions. Only add plugins you wrote or trust; the `examples/` folder isn't loaded until you copy a file out of it.
+- Anyone in the Slack channel can press the buttons unless you list approvers in Settings → Approve from Slack.
 - State, including connector tokens, is stored in plain JSON at `.factory/db.json`. Keep that file out of version control (it is already in `.gitignore`). Tokens are masked before they reach the browser.
 - Local merge runs `git merge --no-ff` in your repo, so keep the base branch checked out and clean. If the merge fails, the ticket moves to Failed and nothing is forced.
 
@@ -151,6 +216,13 @@ server/src
   rules.ts            house rules (CLAUDE.md)
   notifier.ts         Mac / browser / Slack notifications
   reports.ts          standup and weekly report
+  quality.ts          acceptance-criteria proof, coverage gate, safety score
+  game.ts             XP, levels, achievements, quests, streaks, agent cards
+  asker.ts            "Ask a ticket" answers
+  catchup.ts          "While you were away" summary
+  plugins.ts          factory plugin loader (roles, gates, sources, rooms, events)
+  slack-app.ts        Approve from Slack (Socket Mode)
+  connectors/sentry.ts  Sentry issues → tickets
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools
@@ -158,30 +230,32 @@ server/src
   git.ts              worktrees, commits, diff, merge, push
   store.ts            JSON-file store
 server/test           unit + API tests (vitest)
+plugins/              your factory plugins (examples/ has four to copy)
+integrations/
+  claude-code-plugin/ Claude Code plugin + zero-dependency MCP server
+  slack/manifest.json Slack app manifest
 e2e/                  browser tests (Playwright)
 web/src
   views/office/       animated office (layout, simulation, sprites)
-  views/              Inbox, Board, Reports, House rules, Agents, Activity, Settings
+  views/              Inbox, Board, Reports, House rules, Trophy room, Agents, Activity, Settings
   components/         ticket drawer, diff viewer, command palette
 ```
 
 ## Roadmap
 
-Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, and standup/weekly reports.
+Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, standup/weekly reports, test suite and CI, proof per acceptance criterion, coverage gate, safety score, smoke test and revert, gamification, hand-off to VS Code, ask a ticket, catch-up, cost forecasts, dependencies, Claude Code plugin and MCP server, factory plugins, approve from Slack, and Sentry tickets.
 
 **Next up** ⭐
 
 - **Spend dashboard**: cost per ticket, agent and project over time, with a daily cap that pauses the factory.
-- **Dependencies and parallel planning**: "B waits on A", and never running two tickets that touch the same files at once.
 - **Office replay**: scrub back through a ticket's day in the office view.
 - **Recordings in reviews**: short Playwright videos next to the screenshots.
-- **Hand back from VS Code**: after editing a ticket's branch by hand, send it back to the Tester and Reviewer.
+- **Plugin agents in the Office**: plugin roles get their own character and desk.
 
 **Platform**
 
 - Swap the JSON store for SQLite/Postgres and add multi-user auth
 - Webhooks from GitHub/Linear/Jira instead of manual import
-- More roles (Security reviewer, Docs writer) using the same `AgentConfig` shape
 - Run agents in containers for stronger isolation
 
 ## License

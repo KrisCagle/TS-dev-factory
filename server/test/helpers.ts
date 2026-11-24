@@ -22,6 +22,7 @@ export function makeFactory(opts: { mock?: MockOptions; settings?: Partial<Setti
     mode: 'mock',
     serveWeb: false,
     schedules: false,
+    pluginsDir: '',
     speed: opts.speed ?? 0.01,
     mock: {
       speed: 0.003,
@@ -30,6 +31,9 @@ export function makeFactory(opts: { mock?: MockOptions; settings?: Partial<Setti
       reviewRequestsChanges: () => false,
       hangs: () => false,
       ciPasses: () => true,
+      smokePasses: () => true,
+      coverageDrops: () => false,
+      leavesUnproven: () => false,
       ...opts.mock,
     },
   });

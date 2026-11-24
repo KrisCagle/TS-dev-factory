@@ -1,4 +1,4 @@
-import type { AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
+import type { GameView, AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -57,7 +57,27 @@ export interface Report {
   blocked: Array<{ key: string; title: string; why: string }>;
   spendUsd: number;
   harvestHours?: number;
+  highlight?: { key: string; title: string; why: string };
   markdown: string;
+}
+
+export interface PluginsSummary {
+  dir: string;
+  plugins: Array<{ name: string; file: string; description?: string; enabled: boolean; error?: string; roles: string[]; gates: string[]; sources: string[]; rooms: string[] }>;
+  rooms: Array<{ id: string; label: string; icon?: string; plugin: string }>;
+  sources: Array<{ id: string; label: string; plugin: string }>;
+}
+
+export interface CatchUp {
+  since: number;
+  awayMs: number;
+  headline: string;
+  shipped: Array<{ id: string; key: string; title: string }>;
+  needsYou: Array<{ id: string; ticketId?: string; title: string; isNew: boolean }>;
+  problems: Array<{ id: string; key: string; title: string; what: string }>;
+  started: Array<{ id: string; key: string; title: string; stage: string }>;
+  spendUsd: number;
+  quiet: boolean;
 }
 
 export interface ServerState {
@@ -69,6 +89,8 @@ export interface ServerState {
   stats: Stats;
   connectors: Array<{ source: TicketSource; label: string; enabled: boolean }>;
   hasApiKey: boolean;
+  game: GameView;
+  slackApp?: { connected: boolean; error?: string };
 }
 
 export const api = {
@@ -82,6 +104,16 @@ export const api = {
   reject: (id: string, feedback: string) => req('POST', `/api/tickets/${id}/reject`, { feedback }),
   cancel: (id: string) => req('POST', `/api/tickets/${id}/cancel`),
   retry: (id: string) => req('POST', `/api/tickets/${id}/retry`),
+  revert: (id: string, opts: { redo?: boolean; note?: string } = {}) => req<{ redo?: Ticket }>('POST', `/api/tickets/${id}/revert`, opts),
+  smoke: (id: string) => req('POST', `/api/tickets/${id}/smoke`),
+  game: () => req<GameView>('GET', '/api/game'),
+  plugins: () => req<PluginsSummary>('GET', '/api/plugins'),
+  pluginSync: (id: string, projectId?: string) => req<{ fetched: number; created: number }>('POST', `/api/plugins/sources/${id}/sync`, { projectId }),
+  slackAppTest: () => req<{ message: string }>('POST', '/api/slack-app/test'),
+  takeover: (id: string, openEditor = true) => req<{ worktree?: string }>('POST', `/api/tickets/${id}/takeover`, { openEditor }),
+  handback: (id: string, note?: string) => req('POST', `/api/tickets/${id}/handback`, { note }),
+  ask: (id: string, question: string) => req<{ q: string; a: string }>('POST', `/api/tickets/${id}/ask`, { question }),
+  catchup: (since: number, projectId?: string) => req<CatchUp>('GET', `/api/catchup?since=${since}${projectId ? `&projectId=${projectId}` : ''}`),
   note: (id: string, text: string) => req('POST', `/api/tickets/${id}/notes`, { text }),
   updateAgent: (role: AgentRole, a: Partial<AgentConfig>) => req<AgentConfig>('PATCH', `/api/agents/${role}`, a),
   resetAgent: (role: AgentRole) => req<AgentConfig>('POST', `/api/agents/${role}/reset`),

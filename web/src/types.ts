@@ -9,17 +9,18 @@ export type Stage =
   | 'reviewing'
   | 'ci'                 // PR open, waiting for required checks to go green
   | 'awaiting_approval'  // a PM gate: approve the plan, or approve the final change
+  | 'manual'             // you took it over in your editor; hand it back when you're done
   | 'done'
   | 'failed';
 
 export const STAGES: Stage[] = [
-  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'done', 'failed',
+  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'done', 'failed',
 ];
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
 export const PRIORITY_RANK: Record<Priority, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
 
-export type TicketSource = 'local' | 'github' | 'linear' | 'jira';
+export type TicketSource = 'local' | 'github' | 'linear' | 'jira' | 'sentry' | 'plugin';
 export type AgentRole = 'planner' | 'coder' | 'tester' | 'reviewer';
 export type Gate = 'plan' | 'merge';
 
@@ -28,12 +29,62 @@ export interface Plan {
   steps: string[];
   risks: string[];
   files: string[];
+  /** The Planner's forecast for the whole ticket. */
+  estimate?: Estimate;
+}
+
+export interface Estimate {
+  size: 'S' | 'M' | 'L' | 'XL';
+  costUsd: number;
+  minutes: number;
+  /** The raw forecast scaled by how this project's past forecasts turned out. */
+  adjustedCostUsd?: number;
+  adjustedMinutes?: number;
 }
 
 export interface TestReport {
   passed: boolean;
   summary: string;
   failures: string[];
+  /** How many tests the Tester added for this change. */
+  testsAdded?: number;
+  /** One entry per acceptance criterion: is there a passing test or screenshot proving it? */
+  criteria?: CriterionProof[];
+  /** Line coverage before/after the change, when the project can measure it. */
+  coverage?: CoverageReport;
+}
+
+export interface CriterionProof {
+  criterion: string;
+  status: 'proven' | 'unproven' | 'failed';
+  /** The test name, screenshot or command output that proves it. */
+  evidence?: string;
+}
+
+export interface CoverageReport {
+  /** Percent of lines covered on the base branch (all files). */
+  before?: number;
+  /** Percent of lines covered with this change applied. */
+  after?: number;
+  /** Coverage of the files this change touched. */
+  files?: Array<{ file: string; pct: number }>;
+}
+
+/** How safe a change looks before you sign off, with the reasons. */
+export interface Confidence {
+  score: number; // 0–100
+  level: 'high' | 'medium' | 'low';
+  reasons: Array<{ ok: boolean; text: string }>;
+}
+
+/** What happened after a ticket shipped. */
+export interface ShipInfo {
+  /** Commit that landed on the base branch (merge or squash commit). */
+  sha?: string;
+  how: 'local-merge' | 'pull-request' | 'branch' | 'simulated';
+  at: number;
+  smoke?: { state: 'running' | 'passed' | 'failed' | 'skipped'; output?: string; at: number };
+  reverted?: { at: number; prUrl?: string; sha?: string; note?: string };
 }
 
 export interface ReviewComment {
@@ -125,6 +176,8 @@ export interface Project {
   previewCommand?: string; // e.g. "npm run dev -- --port $PORT"
   previewPath?: string;    // e.g. "/" or "/login"
   rules?: string;          // house rules when the repo has no CLAUDE.md we can write
+  smokeCommand?: string;   // run on the base branch after shipping, e.g. "npm test"
+  riskyPaths?: string[];   // touching these lowers the safety score, e.g. "migrations/", "auth"
 }
 
 export interface Ticket {
@@ -158,6 +211,26 @@ export interface Ticket {
   harvest?: { projectId?: number; taskId?: number; timer?: HarvestTimer; loggedHours: number };
   artifacts?: Artifact[];
   preview?: PreviewState;
+  confidence?: Confidence;
+  ship?: ShipInfo;
+  /** Why the ticket went back to the Coder, by cause. */
+  loops?: Partial<Record<LoopCause, number>>;
+  /** Spend per agent role. */
+  costByRole?: Partial<Record<AgentRole, number>>;
+  /** Tickets that must ship before this one starts. */
+  dependsOn?: string[];
+  /** Why a ready ticket isn't being picked up yet. */
+  waitingOn?: { reason: 'dependency' | 'overlap'; keys: string[]; files?: string[] };
+  /** Where the pipeline picks up next time: after a hand-back from your editor, or after an overlap wait. */
+  resume?: 'code' | 'test';
+  /** You took it over in your editor. */
+  manual?: { since: number; from: Stage };
+  /** Where this ticket's inbox item was posted in Slack. */
+  slack?: { channel: string; ts: string; itemId: string };
+  /** Results from plugin agents and plugin quality gates. */
+  checks?: PluginCheck[];
+  /** Questions you asked about this ticket, with the answers. */
+  chat?: Array<{ q: string; a: string; at: number }>;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -180,6 +253,7 @@ export interface ConnectorSettings {
   github: { enabled: boolean; token: string; repo: string; label: string };
   linear: { enabled: boolean; apiKey: string; teamKey: string; stateName: string };
   jira: { enabled: boolean; baseUrl: string; email: string; token: string; jql: string };
+  sentry: { enabled: boolean; baseUrl: string; org: string; project: string; token: string; query: string; webhookSecret: string; autoImport: boolean };
 }
 
 export interface HarvestSettings {
@@ -221,6 +295,48 @@ export interface Settings {
   notifications: NotificationSettings;
   reports: { dailySlack: boolean; dailyTime: string; lastSent?: string };
   scoper: { model: string };
+  quality: QualitySettings;
+  forecast: ForecastSettings;
+  /** Per plugin: on/off and its own settings. Plugins are on unless switched off here. */
+  plugins?: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
+  /** Approve from Slack: a Slack app connected over Socket Mode (works without a public URL). */
+  slackApp: SlackAppSettings;
+}
+
+export interface SlackAppSettings {
+  enabled: boolean;
+  botToken: string;   // xoxb-…
+  appToken: string;   // xapp-… (Socket Mode)
+  channel: string;    // channel ID or #name
+  /** Slack user IDs allowed to approve; empty = anyone in the channel. */
+  approvers: string[];
+  /** The factory's address, for "Open in factory" links. */
+  factoryUrl: string;
+}
+
+export interface PluginCheck {
+  plugin: string;
+  id: string;
+  name: string;
+  kind: 'role' | 'gate';
+  ok: boolean;
+  message?: string;
+  /** Failed checks that only lower the safety score instead of sending the work back. */
+  flagOnly?: boolean;
+}
+
+export interface ForecastSettings {
+  /** Ask before starting work the Planner expects to cost more than this (0 = never ask). */
+  approveAboveUsd: number;
+}
+
+export interface QualitySettings {
+  /** Send the change back to the Coder when an acceptance criterion has no proof. Off = flag it in your review. */
+  requireProof: boolean;
+  /** Send it back when coverage drops by more than maxDropPct points. */
+  coverage: { enabled: boolean; maxDropPct: number };
+  /** Run the project's smoke command on the base branch after shipping, and offer a revert if it fails. */
+  smoke: boolean;
 }
 
 // ---------------------------------------------------------------- attention (the PM's inbox)
@@ -275,7 +391,71 @@ export interface LogEvent {
   ts: number;
 }
 
+export type LoopCause = 'tests' | 'review' | 'ci' | 'coverage' | 'proof' | 'pm';
+
+// ---------------------------------------------------------------- gamification
+
+export interface Achievement {
+  id: string;
+  icon: string;
+  title: string;
+  desc: string;
+  /** Secret until earned. */
+  hidden?: boolean;
+}
+
+export interface Quest {
+  id: string;
+  icon: string;
+  title: string;
+  goal: number;
+  progress: number;
+  done: boolean;
+  xp: number;
+}
+
+export interface AgentCard {
+  role: AgentRole;
+  level: number;
+  xp: number;
+  tickets: number;
+  /** Coder: shipped without rework. Tester: caught problems before review. Reviewer: approved first time it looked. */
+  firstTry: number;
+  caught: number;
+  costUsd: number;
+  bestStreak: number;
+  streak: number;
+}
+
+export interface GameState {
+  xp: number;
+  earned: Array<{ id: string; at: number; ticketKey?: string }>;
+  streak: { current: number; best: number; lastDay?: string };
+  daily: { day: string; quests: Quest[] };
+  agents: Record<AgentRole, AgentCard>;
+  /** Counters behind achievements and stats. */
+  counters: Record<string, number>;
+  /** Projects with at least one ship. */
+  shippedProjects: string[];
+  /** Notable ships for the weekly highlight. */
+  highlights: Array<{ ticketId: string; key: string; title: string; score: number; at: number }>;
+  history: Array<{ at: number; xp: number; why: string }>;
+}
+
+export interface GameView extends GameState {
+  level: number;
+  title: string;
+  levelFloor: number;
+  nextLevelAt: number;
+  achievements: Array<Achievement & { earnedAt?: number }>;
+  unlocks: Array<{ id: string; icon: string; title: string; unlocked: boolean; how: string }>;
+  weeklyHighlight?: GameState['highlights'][number];
+}
+
 export interface DB {
+  game?: GameState;
+  /** Per project: how actual cost/time compared with the Planner's forecasts. */
+  calibration?: Record<string, { n: number; costRatio: number; timeRatio: number }>;
   seq: number;
   seqs?: Record<string, number>; // last ticket number per key prefix
   tickets: Ticket[];

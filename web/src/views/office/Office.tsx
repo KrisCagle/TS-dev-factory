@@ -5,6 +5,8 @@ import { useFactory } from '../../state';
 import { useUI } from '../../ui';
 import { PRIORITY_META, ROLE_META, ago } from '../../meta';
 import type { AgentRole, Ticket } from '../../types';
+import { Decor } from './Decor';
+import { AgentTradingCard } from '../../components/Game';
 import { CORRIDOR_Y, DEFAULT_ZONES, DEPARTMENTS, DESK_Y, H, SEATS, W, breakSpots, chairPt, cx, points, seatX, zoneMap, type Pt, type Zone, type ZoneId } from './layout';
 import { Sim, type Char, type Role } from './sim';
 import { ACCESSORIES, HAIRS, SHIRTS, SKINS, Sprite } from './Sprite';
@@ -24,7 +26,7 @@ function palette(dark: boolean) {
 }
 
 export function Office() {
-  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId } = useFactory();
+  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId, game } = useFactory();
   const { prefs, setOffice } = usePrefs();
   const ui = useUI();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -37,6 +39,10 @@ export function Office() {
 
   const sim = simRef.current;
   const zones = useMemo(() => zoneMap(prefs.office.zones), [prefs.office.zones]);
+  const [pluginRooms, setPluginRooms] = useState<Array<{ id: string; label: string; icon?: string }>>([]);
+  useEffect(() => {
+    api.plugins().then((p) => setPluginRooms(p.rooms)).catch(() => undefined);
+  }, []);
   sim.setZones(zones);
   sim.speed = prefs.office.speed;
 
@@ -221,6 +227,17 @@ export function Office() {
             </g>
           ))}
 
+          {/* rooms added by plugins: booths along the corridor */}
+          {!editLayout && pluginRooms.map((r, i) => (
+            <g key={r.id} transform={`translate(${60 + i * 150} ${CORRIDOR_Y - 18})`}>
+              <rect width={136} height={36} rx={10} fill={C.room} stroke={C.wall} strokeWidth={2} />
+              <text x={68} y={23} textAnchor="middle" fontSize={12} fontWeight={600} fill={C.text}>{r.icon ?? '🔌'} {r.label}</text>
+            </g>
+          ))}
+
+          {/* unlocked upgrades from the Trophy room */}
+          {game && prefs.game.enabled && !editLayout && <Decor zones={zones} game={game} dark={dark} />}
+
           {/* characters, sorted by y for depth */}
           {!editLayout && [...sim.chars].sort((a, b) => a.y - b.y).map((c) => {
             const lk = look(c.role);
@@ -319,6 +336,8 @@ export function Office() {
           <button className="btn ghost sm" style={{ marginLeft: 'auto' }} onClick={onClose}>✕</button>
         </div>
         <div className="small">{status}</div>
+        {c.role !== 'pm' && game && prefs.game.enabled && <AgentTradingCard card={game.agents[c.role as AgentRole]} agent={agentOf(c.role as AgentRole)} color={lk.color} />}
+        {c.role === 'pm' && game && prefs.game.enabled && <div className="small">⭐ Level {game.level} · {game.title}{game.streak.current ? ` · 🔥 ${game.streak.current}-day streak` : ''}</div>}
         {ticket && <button className="btn sm" onClick={() => ui.openTicket(ticket.id)}>Open {ticket.key}: {ticket.title.slice(0, 28)}{ticket.title.length > 28 ? '…' : ''}</button>}
         {c.role === 'pm' && awaiting[0] && <button className="btn sm primary" onClick={() => ui.openTicket(awaiting[0].id)}>Review {awaiting[0].key}</button>}
         {c.home && <button className="btn sm" onClick={() => sim.releaseHome(c)}>Let them roam again</button>}

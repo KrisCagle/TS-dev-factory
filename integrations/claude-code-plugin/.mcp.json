@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "factory": {
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/mcp/factory-mcp.mjs"],
+      "env": {
+        "FACTORY_URL": "${FACTORY_URL:-http://localhost:4317}"
+      }
+    }
+  }
+}
