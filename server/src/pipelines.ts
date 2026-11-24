@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { consolidate } from './attention.js';
-import { extractJson } from './agents/runner.js';
+import { childEnv, extractJson } from './agents/runner.js';
 import { createJiraIssue, jiraReady } from './connectors/jira.js';
 import { resolvePluginDirs } from './sessions.js';
 import type { Scarif } from './scarif.js';
@@ -81,6 +81,7 @@ export class ClaudeDrafter implements Drafter {
       options: {
         cwd,
         model: s.engine.model || 'sonnet',
+        env: childEnv(),
         allowedTools: ['Read', 'Glob', 'Grep', 'Skill'],
         disallowedTools: ['Write', 'Edit', 'MultiEdit', 'Bash'],
         permissionMode: 'default',

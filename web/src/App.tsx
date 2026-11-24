@@ -19,11 +19,16 @@ import { Rules } from './views/Rules';
 import { Trophies } from './views/Trophies';
 import { Celebrations, GamePill } from './components/Game';
 import { WhileAway } from './components/DevTools';
+import { AssistantDock } from './components/Assistant';
+import { Sessions } from './views/Sessions';
+import { Pipelines } from './views/Pipelines';
 
 const NAV: Array<{ v: View; icon: string; label: string; key: string }> = [
   { v: 'inbox', icon: '✋', label: 'Needs you', key: 'i' },
   { v: 'office', icon: '🏢', label: 'Office', key: 'o' },
   { v: 'board', icon: '📋', label: 'Board', key: 'b' },
+  { v: 'sessions', icon: '🧵', label: 'Sessions', key: 'e' },
+  { v: 'pipelines', icon: '🛤', label: 'Pipelines', key: 'p' },
   { v: 'reports', icon: '📊', label: 'Reports', key: 'r' },
   { v: 'agents', icon: '🤖', label: 'Agents', key: 'a' },
   { v: 'rules', icon: '📐', label: 'House rules', key: 'h' },
@@ -40,6 +45,7 @@ export function App() {
   const [creating, setCreating] = useState<Stage | null>(null);
   const [palette, setPalette] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [focused, setFocused] = useState<{ session?: string; pipeline?: string }>({});
   const [filter, setFilter] = useState('');
   const toastTimer = useRef<number>();
   const search = useRef<HTMLInputElement>(null);
@@ -71,6 +77,11 @@ export function App() {
       toastTimer.current = window.setTimeout(() => setToast(null), 2800);
     },
     palette: () => setPalette(true),
+    focused,
+    focus: (what) => {
+      setFocused(what);
+      go(what.session ? 'sessions' : 'pipelines');
+    },
   };
 
   useEffect(() => {
@@ -111,6 +122,7 @@ export function App() {
   }), [f.onNotice, browserOn, go]);
 
   const awaiting = f.needsYou.length;
+  const liveSessions = f.sessions.filter((x) => x.state === 'running' || x.state === 'queued').length;
   const title = NAV.find((n) => n.v === view)?.label;
 
   return (
@@ -124,7 +136,9 @@ export function App() {
           {NAV.map((n) => (
             <button key={n.v} className={`nav-btn ${view === n.v ? 'active' : ''}`} onClick={() => go(n.v)}>
               <span>{n.icon}</span> {n.label}
-              {n.v === 'inbox' && awaiting > 0 ? <span className="count" title="Waiting on you">{awaiting}</span> : <kbd>g {n.key}</kbd>}
+              {n.v === 'inbox' && awaiting > 0 ? <span className="count" title="Waiting on you">{awaiting}</span>
+                : n.v === 'sessions' && liveSessions > 0 ? <span className="count soft" title="Sessions working">{liveSessions}</span>
+                : <kbd>g {n.key}</kbd>}
             </button>
           ))}
           <div className="spacer" />
@@ -155,6 +169,8 @@ export function App() {
                 {view === 'inbox' && <Inbox />}
                 {view === 'office' && <Office />}
                 {view === 'board' && <Board filter={filter} />}
+                {view === 'sessions' && <Sessions />}
+                {view === 'pipelines' && <Pipelines />}
                 {view === 'reports' && <Reports />}
                 {view === 'rules' && <Rules />}
                 {view === 'trophies' && <Trophies />}
@@ -173,6 +189,7 @@ export function App() {
       {toast && <div className="toast">{toast}</div>}
       <Celebrations />
       <WhileAway />
+      {f.ready && <AssistantDock />}
     </UICtx.Provider>
   );
 }

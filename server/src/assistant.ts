@@ -1,3 +1,4 @@
+import { childEnv } from './agents/runner.js';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -259,6 +260,7 @@ export class Assistant {
       prompt: `${history ? `Conversation so far:\n${history}\n\n` : ''}Projects: ${projects.map((p) => p.name).join(', ')}.\nPM: ${said}`,
       options: {
         model: s.assistant.model || 'haiku',
+        env: childEnv(),
         systemPrompt: SYSTEM,
         mcpServers: { factory: server },
         allowedTools: ['mcp__factory__*'],

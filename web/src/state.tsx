@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { api, type FactoryStatus, type ServerState, type Stats } from './api';
-import type { AgentConfig, AttentionItem, GameView, LogEvent, Project, Settings, Ticket } from './types';
+import { api, type EngineInfo, type FactoryStatus, type ServerState, type Stats } from './api';
+import type { AgentConfig, AssistantTurn, AttentionItem, GameView, LogEvent, Pipeline, Project, ScarifFleet, Settings, Ticket, WorkSession } from './types';
 import { usePrefs } from './prefs';
 
 export type Celebration =
@@ -43,10 +43,18 @@ interface FactoryState {
   /** subscribe to raw log events (used by the office for speech bubbles) */
   onLog: (fn: (e: LogEvent) => void) => () => void;
   refresh: () => Promise<void>;
+  /** Claude Code sessions in your repos (the selected project's, or all). */
+  sessions: WorkSession[];
+  pipelines: Pipeline[];
+  scarif: ScarifFleet | null;
+  assistant: AssistantTurn[];
+  engine: EngineInfo | null;
+  /** New assistant turns as they arrive (the voice dock speaks replies). */
+  onAssistant: (fn: (t: AssistantTurn) => void) => () => void;
 }
 
 const Ctx = createContext<FactoryState | null>(null);
-const KIND_RANK: Record<AttentionItem['kind'], number> = { error: 0, review: 1, decision: 2, todo: 3 };
+const KIND_RANK: Record<AttentionItem['kind'], number> = { error: 0, permission: 1, review: 2, decision: 3, question: 4, todo: 5 };
 const MAX_LOGS = 600;
 
 export function FactoryProvider({ children }: { children: ReactNode }) {
@@ -56,6 +64,7 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
   const listeners = useRef(new Set<(e: LogEvent) => void>());
   const noticeListeners = useRef(new Set<(n: Notice) => void>());
   const celebrateListeners = useRef(new Set<(e: Celebration) => void>());
+  const assistantListeners = useRef(new Set<(t: AssistantTurn) => void>());
   const { prefs } = usePrefs();
 
   const refresh = async () => {
@@ -117,6 +126,25 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
           case 'stats':
             setS((p) => p && { ...p, stats: msg.stats });
             break;
+          case 'session':
+            setS((p) => p && { ...p, sessions: upsertBy(p.sessions ?? [], msg.session) });
+            break;
+          case 'sessionDeleted':
+            setS((p) => p && { ...p, sessions: (p.sessions ?? []).filter((x) => x.id !== msg.id) });
+            break;
+          case 'pipeline':
+            setS((p) => p && { ...p, pipelines: upsertBy(p.pipelines ?? [], msg.pipeline) });
+            break;
+          case 'pipelineDeleted':
+            setS((p) => p && { ...p, pipelines: (p.pipelines ?? []).filter((x) => x.id !== msg.id) });
+            break;
+          case 'scarif':
+            setS((p) => p && { ...p, scarif: msg.fleet });
+            break;
+          case 'assistant':
+            setS((p) => p && { ...p, assistant: [...(p.assistant ?? []).filter((t) => t.id !== msg.turn.id), msg.turn].slice(-100) });
+            assistantListeners.current.forEach((fn) => fn(msg.turn));
+            break;
         }
       };
     };
@@ -134,7 +162,8 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
     const all = s?.tickets ?? [];
     const tickets = project ? all.filter((t) => t.projectId === project.id) : all;
     const ids = new Set(tickets.map((t) => t.id));
-    const attention = (s?.attention ?? []).filter((a) => !project || (a.ticketId && ids.has(a.ticketId)));
+    const attention = (s?.attention ?? []).filter((a) => !project || a.projectId === project.id || (a.ticketId && ids.has(a.ticketId)));
+    const inProject = <T extends { projectId: string }>(xs: T[] = []) => (project ? xs.filter((x) => x.projectId === project.id) : xs);
     return {
       ready: !!s,
       connected,
@@ -167,10 +196,27 @@ export function FactoryProvider({ children }: { children: ReactNode }) {
         return () => listeners.current.delete(fn);
       },
       refresh,
+      sessions: inProject(s?.sessions).slice().sort((a, b) => b.updatedAt - a.updatedAt),
+      pipelines: inProject(s?.pipelines).slice().sort((a, b) => b.createdAt - a.createdAt),
+      scarif: s?.scarif ?? null,
+      assistant: s?.assistant ?? [],
+      engine: s?.engine ?? null,
+      onAssistant: (fn: (t: AssistantTurn) => void) => {
+        assistantListeners.current.add(fn);
+        return () => assistantListeners.current.delete(fn);
+      },
     };
   }, [s, logs, connected, prefs.activeProject]);
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
+}
+
+function upsertBy<T extends { id: string }>(xs: T[], x: T) {
+  const i = xs.findIndex((y) => y.id === x.id);
+  if (i < 0) return [...xs, x];
+  const next = xs.slice();
+  next[i] = x;
+  return next;
 }
 
 function upsert(ts: Ticket[], t: Ticket) {

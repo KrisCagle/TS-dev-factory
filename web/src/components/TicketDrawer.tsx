@@ -17,7 +17,7 @@ import { ProjectTag } from './Bits';
 type Tab = 'overview' | 'live' | 'diff' | 'files' | 'quality' | 'ask';
 
 export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void }) {
-  const { tickets, logs: allLogs, agents, attention } = useFactory();
+  const { tickets, logs: allLogs, agents, attention, settings, pipelines } = useFactory();
   const hv = useHarvest();
   const ui = useUI();
   const t = tickets.find((x) => x.id === id);
@@ -91,6 +91,11 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
             {live && <button className="btn danger" disabled={busy} onClick={() => act(() => api.cancel(t.id), 'Cancelled')}>■ Stop agents</button>}
             {t.stage === 'failed' && <button className="btn primary" disabled={busy} onClick={() => act(() => api.retry(t.id), 'Re-queued')}>↻ Retry</button>}
             {t.prUrl && <a className="btn" href={t.prUrl} target="_blank" rel="noreferrer">View PR ↗</a>}
+            {(t.stage === 'backlog' || t.stage === 'ready' || t.stage === 'failed') && (settings?.scarif.enabled || settings?.mode === 'mock') && (
+              <button className="btn" disabled={busy} title="A Scarif droid works it remotely (needs a Jira key and the project’s GitHub repo)" onClick={() => act(() => api.toScarif(t.id), 'Sent to Scarif')}>🛰 Send to Scarif</button>
+            )}
+            {t.stage === 'remote' && <button className="btn" disabled={busy} onClick={() => act(() => api.recallScarif(t.id), 'Back in Ready')}>↩ Run it here instead</button>}
+            {t.pipelineId && (() => { const pl = pipelines.find((x) => x.id === t.pipelineId); return pl ? <button className="btn ghost" onClick={() => { onClose(); ui.focus({ pipeline: pl.id }); }}>🛤 {pl.title}</button> : null; })()}
             {(t.worktree || t.preview) && <PreviewControls t={t} compact />}
             {t.stage !== 'manual' && <HandOff t={t} />}
             <span style={{ flex: 1 }} />
@@ -117,6 +122,12 @@ export function TicketDrawer({ id, onClose }: { id: string; onClose: () => void 
             <>
               {t.stage === 'manual' && <HandOff t={t} />}
               <WaitingBanner t={t} />
+              {t.remote && (
+                <div className="banner" style={{ margin: 0 }}>
+                  🛰 <span className="grow">Scarif: <strong>{t.remote.status.replace(/_/g, ' ')}</strong>{t.remote.worker ? ` on ${t.remote.worker}` : ''} · since {ago(t.remote.since)} ago</span>
+                  {t.remote.url && t.remote.url !== '#' && <a href={t.remote.url} target="_blank" rel="noreferrer">Open in Scarif ↗</a>}
+                </div>
+              )}
               <Forecast t={t} />
               <label className="field">Description
                 <textarea className="textarea" style={{ minHeight: 120 }} defaultValue={t.description} key={t.id + 'd'} onBlur={(e) => e.target.value !== t.description && save({ description: e.target.value })} />

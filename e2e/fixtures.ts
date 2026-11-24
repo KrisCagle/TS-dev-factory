@@ -37,8 +37,11 @@ export class Factory {
     await this.api.post('/api/factory/pause', { data: { paused: true } });
     const s = await this.state();
     for (const t of s.tickets) await this.api.delete(`/api/tickets/${t.id}`);
+    for (const x of s.sessions ?? []) await this.api.delete(`/api/sessions/${x.id}`);
+    for (const x of s.pipelines ?? []) await this.api.delete(`/api/pipelines/${x.id}`);
+    await this.api.delete('/api/assistant');
     const def = s.settings.projects.find((p: { id: string }) => p.id === s.settings.defaultProjectId);
-    await this.api.patch('/api/settings', { data: { projects: [def], gates: { plan: false, merge: true } } });
+    await this.api.patch('/api/settings', { data: { projects: [def], gates: { plan: false, merge: true }, engine: { ...s.settings.engine, permissionMode: 'acceptEdits' } } });
     await this.api.post('/api/factory/pause', { data: { paused: false } });
   }
 

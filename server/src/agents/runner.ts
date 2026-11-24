@@ -50,6 +50,7 @@ export class ClaudeRunner implements AgentRunner {
       options: {
         cwd,
         model: agent.model,
+        env: childEnv(),
         systemPrompt: { type: 'preset', preset: 'claude_code', append: agent.systemPrompt },
         allowedTools: agent.allowedTools,
         permissionMode: 'acceptEdits',
@@ -108,4 +109,16 @@ export function extractJson(text: string): unknown {
     }
   }
   return undefined;
+}
+
+/**
+ * The environment for Claude processes the factory starts. If the factory itself runs inside
+ * Claude Code (say you asked Claude to start it), the parent's session identity must not leak in,
+ * or a child would claim the parent's session id and transcript. Auth settings are kept.
+ */
+export function childEnv(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const drop = new Set(['CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_PID', 'CLAUDECODE', 'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_AFTER_LAST_COMPACT', 'CLAUDE_CODE_CHILD_NOTES_DIR']);
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(env)) if (v !== undefined && !drop.has(k)) out[k] = v;
+  return out;
 }

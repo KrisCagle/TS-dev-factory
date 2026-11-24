@@ -10,6 +10,7 @@ export const STAGE_META: Record<Stage, { label: string; hint: string; icon: stri
   ci: { label: 'CI checks', hint: 'PR open — waiting for checks to go green', icon: '🚦' },
   manual: { label: 'With you', hint: 'You took it over in your editor — hand it back when you’re done', icon: '🧑‍💻' },
   awaiting_approval: { label: 'Needs you', hint: 'Waiting for PM approval', icon: '✋' },
+  remote: { label: 'On Scarif', hint: 'A Scarif droid is working it — the factory tracks it', icon: '🛰' },
   done: { label: 'Shipped', hint: 'Merged or PR opened', icon: '🚀' },
   failed: { label: 'Failed', hint: 'Something broke — retry or edit', icon: '⚠️' },
 };

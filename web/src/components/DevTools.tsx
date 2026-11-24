@@ -118,7 +118,7 @@ export function AskTicket({ t }: { t: Ticket }) {
   const [busy, setBusy] = useState(false);
   const end = useRef<HTMLDivElement>(null);
   const chat = t.chat ?? [];
-  useEffect(() => end.current?.scrollIntoView({ block: 'nearest' }), [chat.length, busy]);
+  useEffect(() => { end.current?.scrollIntoView({ block: 'nearest' }); }, [chat.length, busy]);
   const ask = async (question: string) => {
     if (!question.trim()) return;
     setBusy(true);

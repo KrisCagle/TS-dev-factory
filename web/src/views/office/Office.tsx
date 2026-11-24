@@ -26,7 +26,7 @@ function palette(dark: boolean) {
 }
 
 export function Office() {
-  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId, game } = useFactory();
+  const { tickets, agents, settings, factory, logs, onLog, stats, needsYou, targetProjectId, game, sessions, scarif, pipelines } = useFactory();
   const { prefs, setOffice } = usePrefs();
   const ui = useUI();
   const svgRef = useRef<SVGSVGElement>(null);
@@ -234,6 +234,25 @@ export function Office() {
               <text x={68} y={23} textAnchor="middle" fontSize={12} fontWeight={600} fill={C.text}>{r.icon ?? '🔌'} {r.label}</text>
             </g>
           ))}
+
+          {/* the wider factory: sessions in your repos, pipelines, and Scarif droids — booths along the corridor, after any plugin rooms */}
+          {!editLayout && (() => {
+            const working = sessions.filter((x) => x.state === 'running' || x.state === 'queued').length;
+            const waiting = sessions.filter((x) => x.state === 'waiting').length;
+            const droids = scarif?.state === 'ready' ? scarif.workers.filter((w) => w.jobs.length).length : 0;
+            const openPipes = pipelines.filter((p) => p.stage !== 'done').length;
+            const booths = [
+              { id: 'sessions', icon: '🧵', label: working ? `${working} session${working > 1 ? 's' : ''} working` : waiting ? `${waiting} waiting on you` : 'Sessions', live: working > 0, go: () => ui.go('sessions') },
+              ...(openPipes ? [{ id: 'pipes', icon: '🛤', label: `${openPipes} pipeline${openPipes > 1 ? 's' : ''}`, live: pipelines.some((p) => p.status[p.stage] === 'running'), go: () => ui.go('pipelines') }] : []),
+              ...(scarif && scarif.state !== 'off' ? [{ id: 'scarif', icon: '🛰', label: droids ? `${droids} droid${droids > 1 ? 's' : ''} busy` : 'Scarif bay', live: droids > 0, go: () => ui.go('sessions') }] : []),
+            ];
+            return booths.map((b, i) => (
+              <g key={b.id} transform={`translate(${60 + (pluginRooms.length + i) * 150} ${CORRIDOR_Y - 18})`} style={{ cursor: 'pointer' }} onClick={b.go}>
+                <rect width={136} height={36} rx={10} fill={C.room} stroke={b.live ? prefs.accent : C.wall} strokeWidth={2} className={b.live ? 'booth-live' : undefined} />
+                <text x={68} y={23} textAnchor="middle" fontSize={12} fontWeight={600} fill={C.text}>{b.icon} {b.label}</text>
+              </g>
+            ));
+          })()}
 
           {/* unlocked upgrades from the Trophy room */}
           {game && prefs.game.enabled && !editLayout && <Decor zones={zones} game={game} dark={dark} />}

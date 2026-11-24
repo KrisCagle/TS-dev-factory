@@ -1,4 +1,4 @@
-import type { GameView, AgentConfig, AgentRole, AttentionItem, CaseVerdict, LogEvent, Settings, Ticket, TicketSource } from './types';
+import type { GameView, AgentConfig, AgentRole, AssistantTurn, AttentionItem, CaseVerdict, LogEvent, Pipeline, PipelineStage, ScarifFleet, Settings, StoryDraft, Ticket, TicketDraft, TicketSource, WorkSession } from './types';
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -91,9 +91,53 @@ export interface ServerState {
   hasApiKey: boolean;
   game: GameView;
   slackApp?: { connected: boolean; error?: string };
+  sessions: WorkSession[];
+  pipelines: Pipeline[];
+  scarif: ScarifFleet;
+  assistant: AssistantTurn[];
+  engine: EngineInfo;
+}
+
+export interface EngineInfo {
+  /** Claude Code plugin folders sessions load (yours + a detected process plugin). */
+  pluginDirs: string[];
+  scarifCli: boolean;
+  scarifConfigured: boolean;
+  whisper: boolean;
 }
 
 export const api = {
+  // sessions
+  sessions: () => req<WorkSession[]>('GET', '/api/sessions'),
+  engine: () => req<EngineInfo>('GET', '/api/engine'),
+  startSession: (b: { projectId?: string; prompt: string; title?: string }) => req<WorkSession>('POST', '/api/sessions', b),
+  messageSession: (id: string, text: string) => req<WorkSession>('POST', `/api/sessions/${id}/message`, { text }),
+  stopSession: (id: string) => req<WorkSession>('POST', `/api/sessions/${id}/stop`),
+  resumeSession: (id: string) => req<WorkSession>('POST', `/api/sessions/${id}/resume`),
+  finishSession: (id: string) => req<WorkSession>('POST', `/api/sessions/${id}/finish`),
+  deleteSession: (id: string) => req('DELETE', `/api/sessions/${id}`),
+  // pipelines
+  startPipeline: (b: { projectId?: string; title?: string; scope: string; createInJira?: boolean; useScarif?: boolean }) => req<Pipeline>('POST', '/api/pipelines', b),
+  editPipeline: (id: string, b: { stories?: StoryDraft[]; tickets?: TicketDraft[]; title?: string; createInJira?: boolean; useScarif?: boolean }) => req<Pipeline>('PATCH', `/api/pipelines/${id}`, b),
+  approvePipeline: (id: string, stage?: PipelineStage) => req<Pipeline>('POST', `/api/pipelines/${id}/approve`, { stage }),
+  sendBackPipeline: (id: string, text: string, stage?: PipelineStage) => req<Pipeline>('POST', `/api/pipelines/${id}/sendback`, { text, stage }),
+  retryPipeline: (id: string) => req<Pipeline>('POST', `/api/pipelines/${id}/retry`),
+  deletePipeline: (id: string) => req('DELETE', `/api/pipelines/${id}`),
+  // Scarif
+  scarif: (refresh = false) => req<ScarifFleet>('GET', `/api/scarif${refresh ? '?refresh=1' : ''}`),
+  toScarif: (ticketId: string) => req<Ticket>('POST', `/api/tickets/${ticketId}/scarif`),
+  recallScarif: (ticketId: string) => req<Ticket>('POST', `/api/tickets/${ticketId}/scarif/recall`),
+  // assistant + voice
+  assistant: () => req<AssistantTurn[]>('GET', '/api/assistant'),
+  askAssistant: (text: string) => req<AssistantTurn>('POST', '/api/assistant', { text }),
+  clearAssistant: () => req('DELETE', '/api/assistant'),
+  transcribe: async (audio: Blob) => {
+    const res = await fetch('/api/voice/transcribe', { method: 'POST', headers: { 'Content-Type': audio.type || 'audio/webm' }, body: audio });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error((data as { error?: string }).error ?? res.statusText);
+    return (data as { text: string }).text;
+  },
+
   state: () => req<ServerState>('GET', '/api/state'),
   logs: (limit = 300) => req<LogEvent[]>('GET', `/api/logs?limit=${limit}`),
   ticketLogs: (id: string) => req<LogEvent[]>('GET', `/api/tickets/${id}/logs`),

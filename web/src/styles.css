@@ -443,3 +443,72 @@ pre.code { margin: 0; font: 12px/1.5 var(--mono); overflow: auto; max-height: 70
 /* ---------- integrations */
 .plug { border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; display: grid; gap: 8px; }
 code.cmd { display: block; padding: 6px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); font-size: 12.5px; }
+
+/* ---------------------------------------------------------------- sessions, pipelines, Scarif */
+.sessions { display: grid; grid-template-columns: minmax(250px, 320px) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .sessions { grid-template-columns: 1fr; } }
+.slist { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; position: sticky; top: 0; min-width: 0; }
+.sdetail { min-width: 0; }
+.srow { min-width: 0; overflow: hidden; text-align: left; display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); cursor: pointer; color: inherit; font: inherit; }
+.srow:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.srow.on { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent); }
+.srow .count, .count { background: var(--accent); color: white; border-radius: 999px; font-size: 11px; padding: 0 7px; font-weight: 600; }
+.nav-btn .count.soft { background: color-mix(in srgb, var(--accent) 22%, var(--bg2)); color: var(--accent); }
+.ellipsis { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.grow { flex: 1; }
+.sdot { width: 9px; height: 9px; border-radius: 50%; flex: 0 0 9px; display: inline-block; }
+.sdot.pulse { animation: sdot 1.4s ease-in-out infinite; }
+@keyframes sdot { 50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 25%, transparent); } }
+.sdcard { padding: 16px; display: grid; gap: 10px; }
+.sdcard .banner { margin: 0; }
+.banner.bad { border-color: color-mix(in srgb, var(--bad) 45%, var(--border)); background: color-mix(in srgb, var(--bad) 8%, var(--panel)); }
+.banner.ok { border-color: color-mix(in srgb, var(--ok) 45%, var(--border)); background: color-mix(in srgb, var(--ok) 8%, var(--panel)); }
+.sreport { padding: 8px 12px; border-radius: 8px; background: var(--bg2); font-size: 13.5px; border-left: 3px solid var(--ok); }
+.sreport.review { border-color: var(--accent); }
+.sreport.question { border-color: var(--warn); }
+.sreport.blocked { border-color: var(--bad); }
+.sfeed { max-height: 52vh; overflow: auto; display: grid; gap: 6px; padding: 10px; background: var(--bg2); border-radius: 10px; font-size: 13px; }
+.sev { line-height: 1.45; }
+.sev.tool { color: var(--muted); font-size: 12px; }
+.sev.you { background: var(--panel); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.sev.you .who { font-size: 11px; font-weight: 600; color: var(--accent); }
+.sev.result { font-weight: 600; color: var(--ok); }
+.sev.error { color: var(--bad); }
+.pre { white-space: pre-wrap; word-break: break-word; }
+.droid { display: grid; gap: 4px; padding: 6px 0; border-top: 1px solid var(--border); }
+.jobline { font-size: 12px; }
+.chip.warn { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 45%, var(--border)); }
+.chip.origin { cursor: pointer; font: inherit; font-size: 11.5px; }
+.stepper { display: flex; gap: 4px; align-items: flex-start; }
+.stepper .step { flex: 1; display: grid; gap: 4px; justify-items: start; }
+.stepper .pip { height: 6px; width: 100%; border-radius: 999px; background: var(--border); }
+.stepper .step.done .pip, .stepper .step.approved .pip { background: var(--ok); }
+.stepper .step.running .pip { background: var(--accent); animation: sdot 1.4s infinite; }
+.stepper .step.waiting .pip { background: var(--warn); }
+.stepper .step.blocked .pip { background: var(--bad); }
+.stepper .step.cur span { font-weight: 600; }
+.stepper .step em { display: block; font-style: normal; font-size: 10.5px; color: var(--muted); }
+.stepper.mini .pip { height: 4px; }
+.drafts { display: grid; gap: 8px; }
+.draft { display: grid; gap: 6px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--panel); }
+.crit { margin: 0; padding-left: 18px; color: var(--muted); }
+.gatebar { display: grid; gap: 8px; padding: 12px; border-radius: 10px; border: 1px dashed color-mix(in srgb, var(--warn) 60%, var(--border)); }
+details.scope .pre { margin-top: 6px; padding: 8px 10px; background: var(--bg2); border-radius: 8px; }
+
+/* ---------------------------------------------------------------- assistant dock */
+.adock-fab { position: fixed; right: 20px; bottom: 20px; width: 52px; height: 52px; border-radius: 50%; border: 0; background: var(--accent); color: white; font-size: 22px; cursor: pointer; box-shadow: 0 8px 24px rgba(0,0,0,.18); z-index: 60; }
+.adock-fab.live, .btn.mic.live { animation: mic 1s ease-in-out infinite; background: var(--bad); border-color: var(--bad); color: white; }
+.adock-fab.talking { box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent); }
+@keyframes mic { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--bad) 25%, transparent); } }
+.adock { position: fixed; right: 20px; bottom: 20px; width: min(400px, calc(100vw - 40px)); max-height: min(560px, calc(100vh - 40px)); display: flex; flex-direction: column; gap: 8px; padding: 12px; z-index: 60; box-shadow: 0 16px 48px rgba(0,0,0,.22); }
+.afeed { flex: 1; overflow: auto; display: grid; gap: 8px; align-content: start; min-height: 120px; }
+.aturn { max-width: 88%; padding: 7px 11px; border-radius: 12px; font-size: 13.5px; display: grid; gap: 4px; }
+.aturn.you { justify-self: end; background: var(--accent); color: white; border-bottom-right-radius: 4px; }
+.aturn.you.interim { opacity: .65; }
+.aturn.assistant { justify-self: start; background: var(--bg2); border-bottom-left-radius: 4px; }
+.aturn .chip { background: var(--panel); }
+.asettings { display: grid; gap: 8px; padding: 10px; border-radius: 8px; background: var(--bg2); }
+.asettings label { display: grid; gap: 4px; }
+.btn.mic { min-width: 42px; font-size: 16px; touch-action: none; }
+.booth-live { animation: booth 1.6s ease-in-out infinite; } @keyframes booth { 50% { stroke-width: 4; } }
+.srow > * { min-width: 0; }

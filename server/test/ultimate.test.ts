@@ -317,3 +317,11 @@ describe('the assistant (simulated brain)', () => {
     expect((projectIn('fix vd login', ps, ps[0]) as { name: string }).name).toBe('VDCI');
   });
 });
+
+describe('child processes', () => {
+  it('never pass the parent Claude Code session identity to agents', async () => {
+    const { childEnv } = await import('../src/agents/runner.js');
+    const env = childEnv({ CLAUDE_CODE_SESSION_ID: 'parent', CLAUDE_PID: '1', PATH: '/bin', ANTHROPIC_API_KEY: 'k', CLAUDE_CODE_OAUTH_TOKEN: 't' });
+    expect(env).toEqual({ PATH: '/bin', ANTHROPIC_API_KEY: 'k', CLAUDE_CODE_OAUTH_TOKEN: 't' });
+  });
+});

@@ -13,7 +13,11 @@ const KIND_META: Record<AttentionItem['kind'], { icon: string; label: string; co
   decision: { icon: '🤔', label: 'Decision', color: 'var(--warn)' },
   error: { icon: '⚠️', label: 'Error', color: 'var(--bad)' },
   todo: { icon: '☑️', label: 'To-do', color: 'var(--muted)' },
+  question: { icon: '💬', label: 'Question', color: 'var(--warn)' },
+  permission: { icon: '🔐', label: 'Permission', color: 'var(--bad)' },
 };
+
+const ORIGIN: Record<string, string> = { session: '🧵 Session', pipeline: '🛤 Pipeline', scarif: '🛰 Scarif' };
 
 export function Brief({ item }: { item: AttentionItem }) {
   if (!item.brief) return null;
@@ -40,9 +44,11 @@ function Body({ text }: { text: string }) {
 
 /** One inbox item: context, the brief, and the choices. Reviews open the guided walkthrough. */
 export function DecisionCard({ item, showTicket = true }: { item: AttentionItem; showTicket?: boolean }) {
-  const { tickets } = useFactory();
+  const { tickets, sessions, pipelines } = useFactory();
   const ui = useUI();
   const hv = useHarvest();
+  const session = item.sessionId ? sessions.find((x) => x.id === item.sessionId) : undefined;
+  const pipeline = item.pipelineId ? pipelines.find((x) => x.id === item.pipelineId) : undefined;
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const [walking, setWalking] = useState(false);
@@ -54,7 +60,7 @@ export function DecisionCard({ item, showTicket = true }: { item: AttentionItem;
     setBusy(true);
     try {
       await api.resolve(item.id, { option: optionId, text: text.trim() || undefined });
-      ui.toast(optionId === 'ship' || optionId === 'approve' ? 'Approved' : optionId === 'sendback' ? 'Sent back to the agents' : 'Done');
+      ui.toast(optionId === 'ship' || optionId === 'approve' ? 'Approved' : optionId === 'sendback' ? 'Sent back to the agents' : optionId === 'allow' || optionId === 'always' ? 'Allowed' : optionId === 'deny' ? 'Denied' : item.sessionId ? 'Sent to the session' : 'Done');
     } catch (e) {
       ui.toast(`⚠ ${(e as Error).message}`);
     } finally {
@@ -69,6 +75,16 @@ export function DecisionCard({ item, showTicket = true }: { item: AttentionItem;
       <header className="row">
         <span className="badge" style={{ background: 'color-mix(in srgb, var(--kind) 14%, transparent)', color: meta.color }}>{meta.icon} {meta.label}</span>
         {showTicket && t && <button className="linkish mono small" onClick={() => ui.openTicket(t.id)}>{t.key}</button>}
+        {item.origin && ORIGIN[item.origin] && (
+          <button
+            className="chip origin"
+            title={session ? `Open the session “${session.title}”` : pipeline ? `Open the pipeline “${pipeline.title}”` : undefined}
+            onClick={() => (session ? ui.focus({ session: session.id }) : pipeline ? ui.focus({ pipeline: pipeline.id }) : item.url && window.open(item.url, '_blank'))}
+          >
+            {ORIGIN[item.origin]}{session ? ` · ${session.title}` : pipeline ? ` · ${pipeline.title}` : ''}
+          </button>
+        )}
+        {item.url && <a className="small" href={item.url} target="_blank" rel="noreferrer">Open ↗</a>}
         <span className="small muted">{ago(item.createdAt)} ago</span>
         {held && <span className="chip" title={item.heldReason}>⏳ {item.heldReason ?? 'On hold'}</span>}
       </header>
@@ -90,7 +106,7 @@ export function DecisionCard({ item, showTicket = true }: { item: AttentionItem;
           <textarea
             className="textarea"
             style={{ minHeight: 48 }}
-            placeholder={item.options?.some((o) => o.needsText) ? 'Direction for the agents (needed to send back)…' : 'Optional note for the agents…'}
+            placeholder={item.kind === 'question' ? 'Your answer…' : item.options?.some((o) => o.needsText) ? 'Direction for the agents (needed to send back)…' : 'Optional note for the agents…'}
             value={text}
             onChange={(e) => setText(e.target.value)}
             onFocus={() => t && hv.autoStart(t.id, item.kind === 'review' ? 'PM review' : 'PM decision')}

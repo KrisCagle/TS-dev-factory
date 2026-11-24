@@ -6,33 +6,46 @@ import { useUI } from '../ui';
 import type { AttentionItem } from '../types';
 
 type Filter = 'all' | AttentionItem['kind'];
+type From = 'all' | 'tickets' | 'session' | 'pipeline' | 'scarif';
+const fromOf = (a: AttentionItem): From => (a.origin === 'session' || a.origin === 'pipeline' || a.origin === 'scarif' ? a.origin : 'tickets');
 
 export function Inbox() {
   const { attention, needsYou, tickets } = useFactory();
   const ui = useUI();
   const [filter, setFilter] = useState<Filter>('all');
   const [showDone, setShowDone] = useState(false);
+  const [from, setFrom] = useState<From>('all');
 
   const held = attention.filter((a) => a.status === 'held');
-  const shown = needsYou.filter((a) => filter === 'all' || a.kind === filter);
+  const inFrom = needsYou.filter((a) => from === 'all' || fromOf(a) === from);
+  const shown = inFrom.filter((a) => filter === 'all' || a.kind === filter);
   const resolved = attention
     .filter((a) => a.status === 'resolved')
     .sort((a, b) => (b.resolution?.at ?? b.updatedAt) - (a.resolution?.at ?? a.updatedAt))
     .slice(0, 25);
-  const count = (k: Filter) => (k === 'all' ? needsYou.length : needsYou.filter((a) => a.kind === k).length);
+  const count = (k: Filter) => (k === 'all' ? inFrom.length : inFrom.filter((a) => a.kind === k).length);
+  const fromCount = (k: From) => (k === 'all' ? needsYou.length : needsYou.filter((a) => fromOf(a) === k).length);
+  const kinds = (['all', 'review', 'decision', 'question', 'permission', 'todo', 'error'] as Filter[]).filter((k) => ['all', 'review', 'decision'].includes(k) || count(k) > 0 || filter === k);
   const keyOf = (id?: string) => tickets.find((t) => t.id === id)?.key ?? '';
 
   return (
     <div className="inbox">
       <div className="row wrap" style={{ marginBottom: 14 }}>
         <div className="seg">
-          {(['all', 'review', 'decision', 'error'] as Filter[]).map((f) => (
+          {kinds.map((f) => (
             <button key={f} className={filter === f ? 'on' : ''} onClick={() => setFilter(f)}>
-              {{ all: 'All', review: 'Reviews', decision: 'Decisions', error: 'Errors', todo: 'To-dos' }[f]} {count(f) > 0 && `(${count(f)})`}
+              {{ all: 'All', review: 'Reviews', decision: 'Decisions', error: 'Errors', todo: 'To-dos', question: 'Questions', permission: 'Permissions' }[f]} {count(f) > 0 && `(${count(f)})`}
             </button>
           ))}
         </div>
-        <span className="small muted">Everything the agents need from you, most urgent first. Each item says what we recommend and what happens if it waits.</span>
+        <div className="seg" title="Where it came from">
+          {(['all', 'tickets', 'session', 'pipeline', 'scarif'] as From[]).filter((k) => k === 'all' || fromCount(k) > 0 || from === k).map((k) => (
+            <button key={k} className={from === k ? 'on' : ''} onClick={() => setFrom(k)}>
+              {{ all: 'Everywhere', tickets: '📋 Tickets', session: '🧵 Sessions', pipeline: '🛤 Pipelines', scarif: '🛰 Scarif' }[k]}{k !== 'all' && ` (${fromCount(k)})`}
+            </button>
+          ))}
+        </div>
+        <span className="small muted">Everything the agents, sessions and pipelines need from you, most urgent first.</span>
       </div>
 
       {shown.length === 0 ? (

@@ -35,9 +35,9 @@ export interface Prefs {
   };
 }
 
-export type View = 'inbox' | 'board' | 'office' | 'agents' | 'activity' | 'reports' | 'rules' | 'trophies' | 'settings';
+export type View = 'inbox' | 'board' | 'office' | 'sessions' | 'pipelines' | 'agents' | 'activity' | 'reports' | 'rules' | 'trophies' | 'settings';
 
-export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'done', 'failed'];
+export const ALL_COLUMNS: Stage[] = ['backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'remote', 'done', 'failed'];
 
 const DEFAULTS: Prefs = {
   theme: 'system',

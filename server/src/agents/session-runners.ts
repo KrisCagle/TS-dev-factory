@@ -1,3 +1,4 @@
+import { childEnv } from './runner.js';
 import { createSdkMcpServer, query, tool, type McpServerConfig } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { SESSION_RULES, type SessionRunner, type TurnContext } from '../sessions.js';
@@ -56,6 +57,7 @@ export class ClaudeSessionRunner implements SessionRunner {
       prompt: ctx.prompt,
       options: {
         cwd: ctx.cwd,
+        env: childEnv(),
         model: engine.model || undefined,
         resume: ctx.session.sdkSessionId,
         systemPrompt: { type: 'preset', preset: 'claude_code', append: SESSION_RULES },

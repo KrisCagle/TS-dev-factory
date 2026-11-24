@@ -10,6 +10,7 @@ import { useUI } from '../ui';
 import type { Settings as S, TicketSource } from '../types';
 import { NotificationSettingsCard, ProjectsSettings } from './SettingsExtra';
 import { ClaudeCard, PluginsCard, SlackAppCard } from './SettingsIntegrations';
+import { EngineCard, ScarifCard, VoiceCard } from './SettingsEngine';
 
 const ACCENTS = ['#6366f1', '#8b5cf6', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#ec4899', '#14b8a6'];
 
@@ -165,6 +166,10 @@ export function Settings() {
           <label className="field">Email<input className="input" value={s.connectors.jira.email} onChange={(e) => conn('jira', { email: e.target.value })} /></label>
           <label className="field">API token<input className="input mono" type="password" value={s.connectors.jira.token} onChange={(e) => conn('jira', { token: e.target.value })} /></label>
           <label className="field">JQL<input className="input mono" value={s.connectors.jira.jql} onChange={(e) => conn('jira', { jql: e.target.value })} /></label>
+          <label className="field">Project key for new issues (pipelines)<input className="input mono" placeholder="WING" value={s.connectors.jira.projectKey} onChange={(e) => conn('jira', { projectKey: e.target.value.toUpperCase() })} /></label>
+          <label className="field">Status when work starts (optional)<input className="input" placeholder="In Progress" value={s.connectors.jira.statusMap?.coding ?? ''} onChange={(e) => conn('jira', { statusMap: { ...s.connectors.jira.statusMap, planning: e.target.value, coding: e.target.value, remote: e.target.value } })} /></label>
+          <label className="field">Status when it ships (optional)<input className="input" placeholder="Done" value={s.connectors.jira.statusMap?.done ?? ''} onChange={(e) => conn('jira', { statusMap: { ...s.connectors.jira.statusMap, done: e.target.value } })} /></label>
+          <div className="small muted">Leave the site, email or token empty to use <code>JIRA_SITE</code>, <code>JIRA_EMAIL</code> and <code>JIRA_API_TOKEN</code> from the environment.</div>
         </Conn>
 
         <Conn title="🐞 Sentry" on={s.connectors.sentry.enabled} onToggle={(v) => conn('sentry', { enabled: v })} onTest={() => test('sentry')} onSync={() => sync('sentry')}>
@@ -177,6 +182,10 @@ export function Settings() {
           <div className="row"><Toggle on={s.connectors.sentry.autoImport} onChange={(v) => conn('sentry', { autoImport: v })} /> <span className="small">Import new issues every 10 minutes</span></div>
         </Conn>
       </section>
+
+      <EngineCard s={s} setS={setS} />
+      <ScarifCard s={s} setS={setS} />
+      <VoiceCard s={s} setS={setS} />
 
       <PluginsCard s={s} setS={setS} />
 

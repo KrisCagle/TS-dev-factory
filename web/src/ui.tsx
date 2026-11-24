@@ -9,6 +9,9 @@ export interface UI {
   newTicket: (stage?: Stage) => void;
   toast: (msg: string) => void;
   palette: () => void;
+  /** Jump to a session or pipeline (from the queue, the palette or the assistant). */
+  focus: (what: { session?: string; pipeline?: string }) => void;
+  focused: { session?: string; pipeline?: string };
 }
 
 export const UICtx = createContext<UI | null>(null);
