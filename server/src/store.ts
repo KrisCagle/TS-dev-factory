@@ -3,7 +3,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { DEFAULT_AGENTS, DEFAULT_PROJECT_ID, DEFAULT_SETTINGS } from './agents/defaults.js';
-import type { AgentConfig, AttentionItem, DB, LogEvent, Project, Settings, Ticket } from './types.js';
+import type { AgentConfig, AssistantTurn, AttentionItem, DB, LogEvent, Pipeline, Project, SessionEvent, Settings, Ticket, WorkSession } from './types.js';
 
 const MAX_LOGS = 20_000;
 const SECRET_FIELDS: Array<[keyof Settings['connectors'], string]> = [
@@ -13,6 +13,8 @@ const SECRET_FIELDS: Array<[keyof Settings['connectors'], string]> = [
   ['sentry', 'token'],
   ['sentry', 'webhookSecret'],
 ];
+const MAX_SESSION_EVENTS = 400;
+const MAX_ASSISTANT_TURNS = 200;
 export const MASK = '••••••••';
 
 /** Tiny JSON-file store. Good enough for a single-PM factory; swap for SQLite/Postgres later. */
@@ -67,6 +69,9 @@ export class Store extends EventEmitter {
             jira: { ...fresh.settings.connectors.jira, ...(raw.settings?.connectors?.jira ?? {}) },
             sentry: { ...fresh.settings.connectors.sentry, ...(raw.settings?.connectors?.sentry ?? {}) },
           },
+          engine: { ...fresh.settings.engine, ...(rs.engine ?? {}) },
+          scarif: { ...fresh.settings.scarif, ...(rs.scarif ?? {}) },
+          assistant: { ...fresh.settings.assistant, ...(rs.assistant ?? {}) },
           ciGate: { ...fresh.settings.ciGate, ...(raw.settings?.ciGate ?? {}) },
           watchdog: { ...fresh.settings.watchdog, ...(raw.settings?.watchdog ?? {}) },
           harvest: { ...fresh.settings.harvest, ...(raw.settings?.harvest ?? {}) },
@@ -81,6 +86,10 @@ export class Store extends EventEmitter {
         },
         logs: raw.logs ?? [],
         attention: raw.attention ?? [],
+        // a session can't still be mid-turn after a restart: offer to resume it instead
+        sessions: (raw.sessions ?? []).map((x) => (x.state === 'running' || x.state === 'queued' ? { ...x, state: 'interrupted' as const, updatedAt: Date.now() } : x)),
+        pipelines: (raw.pipelines ?? []).map((p) => (p.status?.[p.stage] === 'running' ? { ...p, status: { ...p.status, [p.stage]: 'blocked' }, error: 'The factory restarted while this stage was running — press Retry.' } : p)),
+        assistant: raw.assistant ?? [],
         game: raw.game,
         calibration: raw.calibration ?? {},
       };
@@ -267,6 +276,99 @@ export class Store extends EventEmitter {
     }
   }
 
+  // ---------- sessions (Claude Code in your repos) ----------
+  sessions() {
+    return (this.db.sessions ??= []);
+  }
+
+  session(id: string) {
+    return this.sessions().find((x) => x.id === id);
+  }
+
+  createSession(s: WorkSession) {
+    this.sessions().push(s);
+    // keep the list bounded: oldest finished sessions go first
+    const finished = this.sessions().filter((x) => ['done', 'stopped', 'error'].includes(x.state));
+    if (finished.length > 200) {
+      const drop = new Set(finished.slice(0, finished.length - 200).map((x) => x.id));
+      this.db.sessions = this.sessions().filter((x) => !drop.has(x.id));
+    }
+    this.scheduleSave();
+    this.emit('session', s);
+    return s;
+  }
+
+  updateSession(id: string, patch: Partial<WorkSession>) {
+    const s = this.session(id);
+    if (!s) return undefined;
+    Object.assign(s, patch, { updatedAt: Date.now() });
+    this.scheduleSave();
+    this.emit('session', s);
+    return s;
+  }
+
+  sessionEvent(id: string, e: Omit<SessionEvent, 'ts'>) {
+    const s = this.session(id);
+    if (!s) return;
+    s.events.push({ ...e, text: e.text.slice(0, 4000), ts: Date.now() });
+    if (s.events.length > MAX_SESSION_EVENTS) s.events.splice(0, s.events.length - MAX_SESSION_EVENTS);
+    s.updatedAt = Date.now();
+    this.scheduleSave();
+    this.emit('session', s);
+  }
+
+  deleteSession(id: string) {
+    this.db.sessions = this.sessions().filter((x) => x.id !== id);
+    for (const a of this.db.attention) if (a.sessionId === id && (a.status === 'open' || a.status === 'held')) a.status = 'dismissed';
+    this.scheduleSave();
+    this.emit('sessionDeleted', id);
+    this.emit('attention', this.db.attention);
+  }
+
+  // ---------- delivery pipelines ----------
+  pipelines() {
+    return (this.db.pipelines ??= []);
+  }
+
+  pipeline(id: string) {
+    return this.pipelines().find((p) => p.id === id);
+  }
+
+  savePipeline(p: Pipeline) {
+    if (!this.pipeline(p.id)) this.pipelines().push(p);
+    p.updatedAt = Date.now();
+    this.scheduleSave();
+    this.emit('pipeline', p);
+    return p;
+  }
+
+  deletePipeline(id: string) {
+    this.db.pipelines = this.pipelines().filter((p) => p.id !== id);
+    for (const a of this.db.attention) if (a.pipelineId === id && (a.status === 'open' || a.status === 'held')) a.status = 'dismissed';
+    this.scheduleSave();
+    this.emit('pipelineDeleted', id);
+    this.emit('attention', this.db.attention);
+  }
+
+  // ---------- the assistant ----------
+  assistantTurns() {
+    return (this.db.assistant ??= []);
+  }
+
+  addAssistantTurn(t: AssistantTurn) {
+    const turns = this.assistantTurns();
+    turns.push(t);
+    if (turns.length > MAX_ASSISTANT_TURNS) turns.splice(0, turns.length - MAX_ASSISTANT_TURNS);
+    this.scheduleSave();
+    this.emit('assistant', t);
+    return t;
+  }
+
+  clearAssistant() {
+    this.db.assistant = [];
+    this.scheduleSave();
+  }
+
   // ---------- gamification ----------
   game() {
     return this.db.game;
@@ -336,6 +438,7 @@ export class Store extends EventEmitter {
     if (s.notifications.slack.webhookUrl) s.notifications.slack.webhookUrl = MASK;
     if (s.slackApp.botToken) s.slackApp.botToken = MASK;
     if (s.slackApp.appToken) s.slackApp.appToken = MASK;
+    if (s.scarif.token) s.scarif.token = MASK;
     return s;
   }
 
@@ -351,6 +454,9 @@ export class Store extends EventEmitter {
         jira: { ...cur.connectors.jira, ...(patch.connectors?.jira ?? {}) },
         sentry: { ...cur.connectors.sentry, ...(patch.connectors?.sentry ?? {}) },
       },
+      engine: { ...cur.engine, ...(patch.engine ?? {}) },
+      scarif: { ...cur.scarif, ...(patch.scarif ?? {}) },
+      assistant: { ...cur.assistant, ...(patch.assistant ?? {}) },
       ciGate: { ...cur.ciGate, ...(patch.ciGate ?? {}) },
       watchdog: { ...cur.watchdog, ...(patch.watchdog ?? {}) },
       harvest: { ...cur.harvest, ...(patch.harvest ?? {}) },
@@ -367,6 +473,7 @@ export class Store extends EventEmitter {
     if (next.notifications.slack.webhookUrl === MASK) next.notifications.slack.webhookUrl = cur.notifications.slack.webhookUrl;
     if (next.slackApp.botToken === MASK) next.slackApp.botToken = cur.slackApp.botToken;
     if (next.slackApp.appToken === MASK) next.slackApp.appToken = cur.slackApp.appToken;
+    if (next.scarif.token === MASK) next.scarif.token = cur.scarif.token;
     if (!next.projects.some((p) => p.id === next.defaultProjectId)) next.defaultProjectId = next.projects[0].id;
     // tickets of a deleted project move to the default one
     for (const t of this.db.tickets) if (!next.projects.some((p) => p.id === t.projectId)) t.projectId = next.defaultProjectId;

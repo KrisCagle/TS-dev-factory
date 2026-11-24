@@ -10,11 +10,12 @@ export type Stage =
   | 'ci'                 // PR open, waiting for required checks to go green
   | 'awaiting_approval'  // a PM gate: approve the plan, or approve the final change
   | 'manual'             // you took it over in your editor; hand it back when you're done
+  | 'remote'             // running on a remote worker (Scarif); the factory tracks it
   | 'done'
   | 'failed';
 
 export const STAGES: Stage[] = [
-  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'done', 'failed',
+  'backlog', 'ready', 'planning', 'coding', 'testing', 'reviewing', 'ci', 'awaiting_approval', 'manual', 'remote', 'done', 'failed',
 ];
 
 export type Priority = 'low' | 'medium' | 'high' | 'urgent';
@@ -231,6 +232,10 @@ export interface Ticket {
   checks?: PluginCheck[];
   /** Questions you asked about this ticket, with the answers. */
   chat?: Array<{ q: string; a: string; at: number }>;
+  /** The delivery pipeline this ticket came from. */
+  pipelineId?: string;
+  /** Work running on a remote worker (Scarif). */
+  remote?: RemoteJob;
   createdAt: number;
   updatedAt: number;
   startedAt?: number;
@@ -252,7 +257,13 @@ export interface AgentConfig {
 export interface ConnectorSettings {
   github: { enabled: boolean; token: string; repo: string; label: string };
   linear: { enabled: boolean; apiKey: string; teamKey: string; stateName: string };
-  jira: { enabled: boolean; baseUrl: string; email: string; token: string; jql: string };
+  jira: {
+    enabled: boolean; baseUrl: string; email: string; token: string; jql: string;
+    /** Project key new issues go to, e.g. "WING" (pipelines can create their tickets in Jira). */
+    projectKey: string;
+    /** Jira status name to move an issue to at each factory stage; empty = by status category. */
+    statusMap: Partial<Record<Stage, string>>;
+  };
   sentry: { enabled: boolean; baseUrl: string; org: string; project: string; token: string; query: string; webhookSecret: string; autoImport: boolean };
 }
 
@@ -301,6 +312,196 @@ export interface Settings {
   plugins?: Record<string, { enabled: boolean; config?: Record<string, unknown> }>;
   /** Approve from Slack: a Slack app connected over Socket Mode (works without a public URL). */
   slackApp: SlackAppSettings;
+  /** Claude Code sessions you dispatch work to. */
+  engine: EngineSettings;
+  /** Scarif remote workers. */
+  scarif: ScarifSettings;
+  /** The assistant you talk to. */
+  assistant: AssistantSettings;
+}
+
+export interface EngineSettings {
+  /** Claude Code plugin folders loaded into every session (e.g. a team process plugin). */
+  pluginDirs: string[];
+  /** Also look for a factory-assistant checkout and load its process plugin. */
+  autoDetectProcessPlugin: boolean;
+  /** ask = permission requests land in your queue; acceptEdits = file edits are fine, the rest asks; bypass = never ask. */
+  permissionMode: 'ask' | 'acceptEdits' | 'bypass';
+  model: string;
+  /** How many sessions may run a turn at once. */
+  maxParallel: number;
+  /** Nudge a session that stops without reporting back. */
+  nudge: boolean;
+  /** Load your user-level Claude Code settings and skills (~/.claude) into sessions. */
+  userSettings: boolean;
+}
+
+export interface ScarifSettings {
+  enabled: boolean;
+  /** Empty = read ~/.scarif/cli.json (what `scarif setup` writes). */
+  url: string;
+  token: string;
+  /** Pipelines send tickets that fit (Jira key, ≤ maxPoints, repo known) to Scarif. */
+  useForPipelines: boolean;
+  maxPoints: number;
+  /** Give sessions Scarif's MCP tools (read-only unless writes are on). */
+  sessionTools: boolean;
+  allowWrites: boolean;
+}
+
+export interface AssistantSettings {
+  model: string;
+  /** Speak replies with the browser's built-in voices. */
+  speak: boolean;
+  /** Optional local speech-to-text command (e.g. whisper.cpp's whisper-cli); empty = the browser's own. */
+  whisperCommand: string;
+}
+
+export interface RemoteJob {
+  kind: 'scarif';
+  key: string;
+  workItemId?: string;
+  status: string;
+  url?: string;
+  worker?: string;
+  since: number;
+  updatedAt: number;
+}
+
+// ---------------------------------------------------------------- sessions (Claude Code in your repos)
+
+export type SessionState = 'queued' | 'running' | 'idle' | 'waiting' | 'done' | 'error' | 'interrupted' | 'stopped';
+export type ReportKind = 'result' | 'review' | 'question' | 'blocked';
+
+export interface SessionEvent {
+  kind: 'you' | 'text' | 'tool' | 'result' | 'error' | 'status';
+  text: string;
+  ts: number;
+}
+
+export interface WorkSession {
+  id: string;
+  projectId: string;
+  title: string;
+  state: SessionState;
+  /** The Claude Code session id, used to continue the conversation. */
+  sdkSessionId?: string;
+  /** Messages waiting for the current turn to finish. */
+  inbox: string[];
+  events: SessionEvent[];
+  report?: { kind: ReportKind; text: string; at: number };
+  pipelineId?: string;
+  ticketId?: string;
+  costUsd: number;
+  turns: number;
+  nudges: number;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ---------------------------------------------------------------- delivery pipelines
+
+export type PipelineStage = 'scope' | 'stories' | 'tickets' | 'plan' | 'execution' | 'validation' | 'done';
+export const PIPELINE_STAGES: PipelineStage[] = ['scope', 'stories', 'tickets', 'plan', 'execution', 'validation', 'done'];
+export type PipelineStageStatus = 'not_started' | 'running' | 'waiting' | 'approved' | 'done' | 'blocked';
+
+export interface StoryDraft {
+  id: string;
+  title: string;
+  /** "As a …, I want …, so that …" */
+  story: string;
+  criteria: string[];
+}
+
+export interface TicketDraft {
+  id: string;
+  title: string;
+  description: string;
+  criteria: string[];
+  /** Agent points (1, 2, 3, 5, 8, 13). */
+  points: number;
+  storyIds: string[];
+  /** Other drafts (by id) that must ship first. */
+  dependsOn: string[];
+  route?: 'local' | 'scarif';
+  routeWhy?: string;
+  /** Board ticket made from this draft. */
+  ticketId?: string;
+  jiraKey?: string;
+}
+
+export interface Pipeline {
+  id: string;
+  projectId: string;
+  title: string;
+  /** What you want built, in your words (the placeholders). */
+  scope: string;
+  stage: PipelineStage;
+  status: Record<PipelineStage, PipelineStageStatus>;
+  stories: StoryDraft[];
+  tickets: TicketDraft[];
+  plan?: { summary: string; waves: string[][] };
+  /** Your send-back notes, newest last. */
+  feedback: Array<{ stage: PipelineStage; text: string; at: number }>;
+  log: Array<{ text: string; at: number }>;
+  /** Create the tickets in Jira too (needs the Jira connector and a project key). */
+  createInJira: boolean;
+  /** Send tickets that fit to Scarif. */
+  useScarif: boolean;
+  costUsd: number;
+  error?: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+// ---------------------------------------------------------------- the assistant
+
+export interface AssistantTurn {
+  id: string;
+  role: 'you' | 'assistant';
+  text: string;
+  /** What the assistant did, e.g. "Started a session in WingBuddies". */
+  actions?: string[];
+  ts: number;
+}
+
+// ---------------------------------------------------------------- Scarif fleet
+
+export interface ScarifJobView {
+  workItemId: string;
+  key: string;
+  jiraKey?: string;
+  summary?: string;
+  status: string;
+  stage?: string;
+  needsHuman: boolean;
+  url: string;
+  repos: string[];
+  updatedAt?: number;
+}
+
+export interface ScarifWorkerView {
+  id: string;
+  name: string;
+  status: string;
+  healthy?: boolean;
+  lastHeartbeatAt?: number;
+  load?: number;
+  cpus?: number;
+  diskPct?: number;
+  jobs: ScarifJobView[];
+}
+
+export interface ScarifFleet {
+  state: 'off' | 'unconfigured' | 'ready' | 'error';
+  error?: string;
+  at: number;
+  url?: string;
+  workers: ScarifWorkerView[];
+  /** Your jobs not on a worker yet (queued). */
+  queued: ScarifJobView[];
+  cliInstalled: boolean;
 }
 
 export interface SlackAppSettings {
@@ -341,7 +542,7 @@ export interface QualitySettings {
 
 // ---------------------------------------------------------------- attention (the PM's inbox)
 
-export type AttentionKind = 'decision' | 'review' | 'error' | 'todo';
+export type AttentionKind = 'decision' | 'review' | 'error' | 'todo' | 'question' | 'permission';
 
 /** Every decision comes with the reasoning the PM needs to make it quickly. */
 export interface DecisionBrief {
@@ -367,6 +568,13 @@ export interface AttentionItem {
   id: string;
   kind: AttentionKind;
   ticketId?: string;
+  /** Posted by a Claude Code session (answers go back to it). */
+  sessionId?: string;
+  pipelineId?: string;
+  projectId?: string;
+  /** Where it came from, shown as a chip: "session", "pipeline", "scarif"… */
+  origin?: string;
+  url?: string;
   key: string;              // dedupe/supersede key, e.g. "merge:<ticketId>"
   title: string;
   body?: string;
@@ -463,4 +671,7 @@ export interface DB {
   settings: Settings;
   logs: LogEvent[];
   attention: AttentionItem[];
+  sessions?: WorkSession[];
+  pipelines?: Pipeline[];
+  assistant?: AssistantTurn[];
 }

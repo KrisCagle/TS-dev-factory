@@ -100,7 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
   connectors: {
     github: { enabled: false, token: '', repo: '', label: 'factory' },
     linear: { enabled: false, apiKey: '', teamKey: '', stateName: 'Todo' },
-    jira: { enabled: false, baseUrl: '', email: '', token: '', jql: 'labels = factory AND statusCategory != Done' },
+    jira: { enabled: false, baseUrl: '', email: '', token: '', jql: 'labels = factory AND statusCategory != Done', projectKey: '', statusMap: {} },
     sentry: { enabled: false, baseUrl: 'https://sentry.io', org: '', project: '', token: '', query: 'is:unresolved', webhookSecret: '', autoImport: false },
   },
   ciGate: { enabled: true, pollSeconds: 30, mergeMethod: 'squash', maxWaitMinutes: 60 },
@@ -119,4 +119,7 @@ export const DEFAULT_SETTINGS: Settings = {
   quality: { requireProof: false, coverage: { enabled: true, maxDropPct: 0.5 }, smoke: true },
   forecast: { approveAboveUsd: 3 },
   slackApp: { enabled: false, botToken: '', appToken: '', channel: '', approvers: [], factoryUrl: 'http://localhost:4317' },
+  engine: { pluginDirs: [], autoDetectProcessPlugin: true, permissionMode: 'acceptEdits', model: 'sonnet', maxParallel: 3, nudge: true, userSettings: true },
+  scarif: { enabled: false, url: '', token: '', useForPipelines: true, maxPoints: 13, sessionTools: true, allowWrites: false },
+  assistant: { model: 'haiku', speak: true, whisperCommand: '' },
 };

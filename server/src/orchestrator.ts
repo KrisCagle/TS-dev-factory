@@ -70,7 +70,10 @@ export class Orchestrator {
   private shuttingDown = false;
 
   /** Extension points used by other services (previews, artifacts). */
-  hooks: { plugins?: Plugins; rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void> } = {};
+  hooks: { plugins?: Plugins; rulesFor?: (projectId: string) => string; onFinished?: (ticketId: string) => void; afterTester?: (ticketId: string, cwd: string) => Promise<void>; afterReview?: (ticketId: string) => Promise<void>;
+    /** Items that belong to someone else (sessions, pipelines, Scarif) get answered there. Return true when handled. */
+    resolveOther?: (item: AttentionItem, input: ResolveInput) => boolean;
+  } = {};
 
   constructor(private store: Store, private harvest: HarvestService, opts: OrchestratorOptions = {}) {
     this.mock = new MockRunner(opts.mock);
@@ -272,6 +275,7 @@ export class Orchestrator {
     const done = (patch: Partial<AttentionItem['resolution']> = {}) =>
       this.store.updateAttention(item.id, { status: 'resolved', resolution: { option, text: input.text, verdicts: input.verdicts, notes: input.notes, at: Date.now(), ...patch } });
 
+    if (this.hooks.resolveOther?.(item, input)) return;
     if (!t) {
       done();
       return;

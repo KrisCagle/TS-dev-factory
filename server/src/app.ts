@@ -21,6 +21,11 @@ import { Plugins } from './plugins.js';
 import { SlackApp } from './slack-app.js';
 import { toTicket as sentryTicket, verifySignature } from './connectors/sentry.js';
 import { Orchestrator } from './orchestrator.js';
+import { SessionManager, resolvePluginDirs } from './sessions.js';
+import { ClaudeSessionRunner, MockSessionRunner } from './agents/session-runners.js';
+import { ClaudeDrafter, MockDrafter, Pipelines } from './pipelines.js';
+import { Scarif, readCredentials, scarifBin } from './scarif.js';
+import { Assistant, transcribe } from './assistant.js';
 import { Store } from './store.js';
 import type { AgentRole, Priority, Stage, Ticket, TicketSource } from './types.js';
 import type { MockOptions } from './agents/mock.js';
@@ -46,6 +51,8 @@ export interface FactoryOptions {
   pluginsDir?: string;
   /** Override how plugin files are imported (tests). */
   pluginImporter?: (file: string) => Promise<Record<string, unknown>>;
+  /** Scarif API/CLI stand-ins (tests). */
+  scarif?: ConstructorParameters<typeof Scarif>[2];
 }
 
 /** Builds the whole factory — store, orchestrator, services, REST + WebSocket API — without listening yet. */
@@ -73,6 +80,14 @@ export function createFactory(opts: FactoryOptions) {
   const pluginsReady = pluginsDir ? plugins.load().catch((e) => console.error('[plugins]', e)) : Promise.resolve();
   store.on('settings', () => plugins.refreshEnabled());
   const slackApp = new SlackApp(store, orch);
+  const speed = opts.speed ?? opts.mock?.speed ?? 1;
+  const scarif = new Scarif(store, (fleet) => broadcastLate({ type: 'scarif', fleet }), { speed, ...(opts.scarif ?? {}) });
+  const sessions = new SessionManager(store, {
+    live: () => new ClaudeSessionRunner(() => store.settings().engine, () => scarif.sessionTools()),
+    mock: () => new MockSessionRunner(speed, () => store.settings().engine),
+  }, { speed });
+  const pipelines = new Pipelines(store, { live: () => new ClaudeDrafter(store), mock: () => new MockDrafter(speed) }, scarif);
+  const assistant = new Assistant({ store, orch, sessions, pipelines, scarif });
   const game = new Game(store, (event) => broadcastLate({ type: 'celebrate', event }));
   orch.hooks = {
     plugins,
@@ -80,7 +95,14 @@ export function createFactory(opts: FactoryOptions) {
     onFinished: (ticketId) => previews.stop(ticketId),
     afterTester: (ticketId, cwd) => artifacts.collect(ticketId, cwd),
     afterReview: (ticketId) => artifacts.link(ticketId),
+    resolveOther: (item, input) => sessions.resolveError(item, input.option) || sessions.resolve(item, input) || pipelines.resolve(item, input) || scarifTodo(item),
   };
+  // Scarif's "needs you" items just get acknowledged; the answer happens in Scarif
+  function scarifTodo(item: { id: string; key: string }) {
+    if (!item.key.startsWith('scarif:')) return false;
+    store.updateAttention(item.id, { status: 'resolved', resolution: { option: 'done', at: Date.now() } });
+    return true;
+  }
 
   const app = express();
   // keep the raw body for webhook signature checks
@@ -126,6 +148,55 @@ export function createFactory(opts: FactoryOptions) {
     hasApiKey: !!process.env.ANTHROPIC_API_KEY,
     game: game.view(),
     slackApp: slackApp.status,
+    sessions: sessions.list(),
+    pipelines: pipelines.list(),
+    scarif: scarif.fleet,
+    assistant: assistant.turns().slice(-50),
+    engine: engineInfo(),
+  })));
+
+  function engineInfo() {
+    const s = store.settings();
+    return {
+      pluginDirs: resolvePluginDirs(s.engine.pluginDirs, s.engine.autoDetectProcessPlugin),
+      scarifCli: !!scarifBin(),
+      scarifConfigured: !!readCredentials(s.scarif),
+      whisper: !!s.assistant.whisperCommand.trim(),
+    };
+  }
+
+  // ---------------------------------------------------------------- sessions (Claude Code in your repos)
+  app.get('/api/sessions', wrap(() => sessions.list()));
+  app.get('/api/engine', wrap(() => engineInfo()));
+  app.post('/api/sessions', wrap((req) => sessions.start({ projectId: req.body?.projectId, prompt: String(req.body?.prompt ?? ''), title: req.body?.title })));
+  app.post('/api/sessions/:id/message', wrap((req) => sessions.send(req.params.id, String(req.body?.text ?? ''))));
+  app.post('/api/sessions/:id/stop', wrap((req) => sessions.stop(req.params.id)));
+  app.post('/api/sessions/:id/resume', wrap((req) => sessions.resume(req.params.id)));
+  app.post('/api/sessions/:id/finish', wrap((req) => sessions.finish(req.params.id)));
+  app.delete('/api/sessions/:id', wrap((req) => sessions.remove(req.params.id)));
+
+  // ---------------------------------------------------------------- delivery pipelines
+  app.get('/api/pipelines', wrap(() => pipelines.list()));
+  app.post('/api/pipelines', wrap((req) => pipelines.create({
+    projectId: req.body?.projectId, title: req.body?.title, scope: String(req.body?.scope ?? ''), createInJira: !!req.body?.createInJira, useScarif: req.body?.useScarif,
+  })));
+  app.patch('/api/pipelines/:id', wrap((req) => pipelines.edit(req.params.id, req.body ?? {})));
+  app.post('/api/pipelines/:id/approve', wrap((req) => pipelines.approve(req.params.id, req.body?.stage)));
+  app.post('/api/pipelines/:id/sendback', wrap((req) => pipelines.sendBack(req.params.id, String(req.body?.text ?? ''), req.body?.stage)));
+  app.post('/api/pipelines/:id/retry', wrap((req) => pipelines.retry(req.params.id)));
+  app.delete('/api/pipelines/:id', wrap((req) => pipelines.remove(req.params.id)));
+
+  // ---------------------------------------------------------------- Scarif
+  app.get('/api/scarif', wrap((req) => (req.query.refresh === '1' ? scarif.refresh() : scarif.fleet)));
+  app.post('/api/tickets/:id/scarif', wrap((req) => scarif.enqueue(req.params.id)));
+  app.post('/api/tickets/:id/scarif/recall', wrap((req) => scarif.recall(req.params.id)));
+
+  // ---------------------------------------------------------------- the assistant + voice
+  app.get('/api/assistant', wrap(() => assistant.turns()));
+  app.post('/api/assistant', wrap((req) => assistant.ask(String(req.body?.text ?? ''))));
+  app.delete('/api/assistant', wrap(() => assistant.clear()));
+  app.post('/api/voice/transcribe', express.raw({ type: () => true, limit: '25mb' }), wrap(async (req) => ({
+    text: await transcribe(store.settings().assistant.whisperCommand, req.body as Buffer, String(req.headers['content-type'] ?? 'audio/webm')),
   })));
 
   app.get('/api/logs', wrap((req) => store.logs(undefined, Number(req.query.limit ?? 300))));
@@ -405,6 +476,11 @@ export function createFactory(opts: FactoryOptions) {
   store.on('factory', (factory) => broadcast({ type: 'factory', factory }));
   store.on('attention', (attention) => { broadcast({ type: 'attention', attention }); pushStats(); });
   store.on('game', (g) => broadcast({ type: 'game', game: g }));
+  store.on('session', (session) => broadcast({ type: 'session', session }));
+  store.on('sessionDeleted', (id) => broadcast({ type: 'sessionDeleted', id }));
+  store.on('pipeline', (pipeline) => broadcast({ type: 'pipeline', pipeline }));
+  store.on('pipelineDeleted', (id) => broadcast({ type: 'pipelineDeleted', id }));
+  store.on('assistant', (turn) => broadcast({ type: 'assistant', turn }));
 
   let started = false;
   return {
@@ -416,6 +492,10 @@ export function createFactory(opts: FactoryOptions) {
     plugins,
     pluginsReady,
     slackApp,
+    sessions,
+    pipelines,
+    scarif,
+    assistant,
     /** Start listening and start the agents' scheduler. Resolves with the bound port. */
     async listen(port: number) {
       await pluginsReady;
@@ -424,6 +504,7 @@ export function createFactory(opts: FactoryOptions) {
           started = true;
           orch.start();
           slackApp.start();
+          scarif.start();
           if (opts.schedules !== false) reports.startSchedule();
           resolve((server.address() as { port: number }).port);
         });
@@ -433,6 +514,8 @@ export function createFactory(opts: FactoryOptions) {
     async close() {
       clearInterval(sentryTimer);
       slackApp.stop();
+      scarif.stop();
+      sessions.stopAll();
       orch.stop();
       previews.stopAll();
       reports.stopSchedule();
