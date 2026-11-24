@@ -4,6 +4,8 @@ A software factory where Claude agents work your tickets and you run the floor a
 
 You write or import tickets. A team of four agents (Planner, Coder, Tester, Reviewer) plans, builds, tests and reviews each one in its own branch. You only step in when they need a decision or your sign-off, and you watch it all happen in an animated office.
 
+It's also a daily driver for everything else you hand to Claude: **dispatch Claude Code sessions** into any of your repos, run bigger work through **delivery pipelines** (stories → tickets → shipped, with three validations from you), send tickets to **Scarif** droids, and **talk to it**: hold Right ⌥ and ask what needs you, start a session, or approve what's waiting. All of it lands in one **Needs you** queue.
+
 ![The office: agents carry tickets desk to desk while you approve work from the PM office](screenshots/office-dark.png)
 
 ```
@@ -38,6 +40,17 @@ You write or import tickets. A team of four agents (Planner, Coder, Tester, Revi
 - **Cost forecasts** 📏: the Planner forecasts size, cost and time for every ticket. Anything forecast over your limit (default $3) asks you first. Forecasts adjust to how past tickets on each project actually went, and the drawer shows forecast against actual.
 - **Dependencies and no collisions** ⛓: mark "waits on" between tickets and they run in order. Two tickets that plan to change the same files never code at the same time; the second one waits and says why.
 - **Notes and control**: add notes every agent treats as top priority, approve plans before coding (optional), stop a ticket, or pause the whole factory.
+
+### Your daily driver: sessions, pipelines and voice 🎙
+
+- **Sessions** 🧵: Claude Code working in one of your repos on whatever you ask: a fix, an investigation, a refactor, or a skill like `/create-user-stories`. Sessions never wait on you. Questions, decisions, permission requests and finished work go to **Needs you**, and your answers go straight back into the conversation. Every turn ends with a one-line report (RESULT, REVIEW, QUESTION or BLOCKED) shown on the session's card. A session that stops without reporting gets one nudge, and sessions interrupted by a restart can be resumed.
+- **Your team's process, loaded, not copied**: sessions and pipeline drafting load the Claude Code plugins you list, such as a team process plugin with story, ticket, PR and review skills. A `factory-assistant` checkout's `process-plugin` is picked up automatically from `~/Documents`, `~/workspace` or `~/code`.
+- **Permissions your way**: *Ask me* (every tool call that needs permission becomes an Allow / Always allow / Deny item in your queue), *Edits OK, ask for the rest* (default), or *Never ask*.
+- **Delivery pipelines** 🛤: describe a piece of work in your own words. The factory drafts user stories (you validate), breaks them into tickets with acceptance criteria, agent points and dependencies (you validate, and can edit anything first), orders them into waves, and puts them on the board. When every ticket has shipped you walk through the whole thing once. Feedback becomes follow-up tickets; approval closes the pipeline. Tickets can be created in Jira as well.
+- **Scarif** 🛰: send a ticket (it needs a Jira key) to a Scarif droid from its drawer, or let pipelines route tickets that fit. They sit in the **On Scarif** column while the factory tracks the job. When a droid waits on a person you get a to-do with the link, and the ticket ships when the job completes. The droids working your jobs show in Sessions and in the Office. Sessions can also use Scarif's tools (read-only unless you allow writes).
+- **Jira, deeper**: credentials from settings or `JIRA_SITE` / `JIRA_EMAIL` / `JIRA_API_TOKEN`, your own status names for "started" and "shipped", and issue creation for pipelines.
+- **Voice, free** 🎙: hold **Right ⌥** anywhere in the app (or the mic button) and talk; release to send. Listening uses the browser's built-in speech recognition, or a local Whisper command if you'd rather nothing leaves your Mac. Replies are spoken with your Mac's own voices; Esc stops it. The assistant is a dispatcher: it answers in a sentence or two and does things for you (start a session or pipeline, add a ticket, read your queue, approve or send back). In simulated mode it understands the common requests with no model at all.
+- **One queue for everything**: Needs you now holds questions and permission requests too. Each item shows where it came from (a ticket, a session, a pipeline or Scarif) with a chip that jumps there, and you can filter by source.
 
 ### Running more than one thing
 
@@ -83,6 +96,12 @@ A live, top-down animated office. Each agent is a character that pulls tickets o
 Theme, accent color, density, board columns, card fields, header widgets, grouping and default view. There's a ⌘K command palette and keyboard shortcuts: `n` new ticket, `g` then `i/o/b/r/a/h/t/l/s` to navigate, `/` to filter.
 
 ## Screenshots
+
+| Sessions in your repos | Delivery pipeline |
+| --- | --- |
+| ![A session's live transcript with a permission request from it](screenshots/sessions.png) | ![A pipeline at the tickets gate: editable tickets with points and dependencies](screenshots/pipelines.png) |
+| **Needs you, from everywhere** | **Talk to it** |
+| ![Permission requests and reviews from sessions, filtered by source](screenshots/needs-you-sources.png) | ![The assistant dock starting a session from a spoken request](screenshots/assistant.png) |
 
 | Needs you inbox | Review walkthrough with screenshots |
 | --- | --- |
@@ -132,7 +151,7 @@ For development with hot reload: `npm run dev`, then open http://localhost:5173.
 Everything runs against the simulated agents, so tests are free, fast and don't need an API key.
 
 ```bash
-npm test              # unit + API tests (~60 tests, a few seconds)
+npm test              # unit + API tests (~160 tests, about 25 seconds)
 npm run test:e2e      # browser tests with Playwright: walkthrough, ship, projects, ticket writer…
 npm run test:all      # typecheck + both of the above
 ```
@@ -149,6 +168,9 @@ To watch a faster demo yourself: `FACTORY_MOCK_SPEED=0.2 npm start` runs the sim
 2. Open **Settings → Projects** and set the project's **Repository path** (a local git repo) and **Base branch**, then switch the factory mode to **Live**. Add a project for each repo you want the factory to work on.
 3. Choose what **Approve** does for each project: merge locally, open a PR (needs the GitHub connector), or leave the branch.
 4. Set a **Budget per ticket**. Agents stop and escalate to you when they reach it.
+5. **Sessions** (Settings → Sessions): add your team's Claude Code plugin folders (a `factory-assistant/process-plugin` checkout is found on its own) and choose how sessions ask for permission.
+6. **Scarif** (optional): install the `scarif` CLI and run `scarif setup` once, then turn Scarif on in Settings. Set each project's GitHub repo (`owner/repo`); Scarif works from Jira tickets.
+7. **Local voice** (optional): `brew install whisper-cpp ffmpeg`, download a model such as `ggml-base.en.bin` to `~/models`, and set Settings → Voice → *Local speech-to-text command* to `whisper-cli -m ~/models/ggml-base.en.bin -nt -np -f {file}`. Then pick "Local Whisper" in the assistant's ⚙.
 
 Agents load your repo's `CLAUDE.md`, so put team conventions there. You can edit it from **House rules**.
 
@@ -193,6 +215,10 @@ The factory must be running. Tools: `factory_status`, `list_tickets`, `get_ticke
 
 ## Safety notes
 
+- Sessions run in your **real repo folder**, not a worktree, because they're for the work you'd otherwise do in a terminal. Use *Ask me* permissions when you want to see every command first. *Never ask* runs anything without asking.
+- The Scarif token is read from `~/.scarif/cli.json` on the server and never sent to the browser. Scarif tools that change things are hidden from sessions unless you turn on writes.
+- Voice: Safari recognizes speech on your Mac. Chrome sends the audio to Google's speech service. Set a local Whisper command (Settings → Voice) to keep audio on your machine.
+
 - Agents run with `acceptEdits` permission mode. They are limited to the tools you allow for each role, and they work inside a separate worktree, never in your checkout.
 - The Coder and Tester can run `Bash` by default. Remove it on the Agents page if you'd rather they didn't.
 - Factory plugins run inside the factory process with your user's permissions. Only add plugins you wrote or trust; the `examples/` folder isn't loaded until you copy a file out of it.
@@ -223,6 +249,11 @@ server/src
   plugins.ts          factory plugin loader (roles, gates, sources, rooms, events)
   slack-app.ts        Approve from Slack (Socket Mode)
   connectors/sentry.ts  Sentry issues → tickets
+  sessions.ts         Claude Code sessions in your repos: reports, queue items, permissions, resume
+  pipelines.ts        delivery pipelines: stories → tickets → plan → execution → validation
+  scarif.ts           Scarif fleet, enqueue, remote tracking, read-only MCP for sessions
+  assistant.ts        the voice/typed assistant (dispatcher) + local speech-to-text
+  agents/session-runners.ts  live (Agent SDK) and simulated session runners
   agents/runner.ts    Claude Agent SDK runner (structured JSON output for plan/test/review)
   agents/mock.ts      simulated agents for demo mode
   agents/defaults.ts  default role prompts, models, tools
@@ -237,15 +268,18 @@ integrations/
 e2e/                  browser tests (Playwright)
 web/src
   views/office/       animated office (layout, simulation, sprites)
-  views/              Inbox, Board, Reports, House rules, Trophy room, Agents, Activity, Settings
-  components/         ticket drawer, diff viewer, command palette
+  views/              Inbox, Board, Sessions, Pipelines, Reports, House rules, Trophy room, Agents, Activity, Settings
+  components/         ticket drawer, diff viewer, command palette, assistant dock (voice)
 ```
 
 ## Roadmap
 
-Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, standup/weekly reports, test suite and CI, proof per acceptance criterion, coverage gate, safety score, smoke test and revert, gamification, hand-off to VS Code, ask a ticket, catch-up, cost forecasts, dependencies, Claude Code plugin and MCP server, factory plugins, approve from Slack, and Sentry tickets.
+Already shipped: agent pipeline, animated office, Needs you inbox with decision briefs, guided review walkthrough, CI-aware merge gate, watchdog, Harvest time tracking, projects, ticket writer, live preview, code viewer, screenshots in reviews, house rules, notifications, standup/weekly reports, test suite and CI, proof per acceptance criterion, coverage gate, safety score, smoke test and revert, gamification, hand-off to VS Code, ask a ticket, catch-up, cost forecasts, dependencies, Claude Code plugin and MCP server, factory plugins, approve from Slack, Sentry tickets, sessions in your repos, delivery pipelines, Scarif, Jira status mapping, and free voice.
 
 **Next up** ⭐
+
+- **Push-to-talk from anywhere**: a small menu-bar helper so Right ⌥ works when the factory tab isn't focused.
+- **Session hand-off to the terminal**: open any session in `claude --resume` and bring it back.
 
 - **Spend dashboard**: cost per ticket, agent and project over time, with a daily cap that pauses the factory.
 - **Office replay**: scrub back through a ticket's day in the office view.
